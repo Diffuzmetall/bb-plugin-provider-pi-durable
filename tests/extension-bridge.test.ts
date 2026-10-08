@@ -92,15 +92,8 @@ describe("Extension Bridge (Cycle 60)", () => {
 	});
 
 	it("setupExtensionRunner supports lifecycle startup and shutdown", async () => {
-		const { DefaultResourceLoader, getAgentDir, SettingsManager, ModelRuntime } =
-			await import("@earendil-works/pi-coding-agent");
-		const loader = new DefaultResourceLoader({
-			cwd: process.cwd(),
-			agentDir: getAgentDir(),
-			settingsManager: SettingsManager.create(process.cwd()),
-		});
-		await loader.reload();
-		const { extensions, runtime } = loader.getExtensions();
+		const { createExtensionRuntime, ModelRuntime } = await import("@earendil-works/pi-coding-agent");
+		const runtime = createExtensionRuntime();
 
 		let shutdownEmitted = false;
 		const mockExtension: any = {
@@ -112,7 +105,7 @@ describe("Extension Bridge (Cycle 60)", () => {
 
 		const { setupExtensionRunner } = await import("../src/runner/extension-bridge.ts");
 		const runner = await setupExtensionRunner({
-			extensions: [...extensions, mockExtension],
+			extensions: [mockExtension],
 			runtime,
 			cwd: process.cwd(),
 			modelRuntime: await ModelRuntime.create(),
@@ -120,7 +113,7 @@ describe("Extension Bridge (Cycle 60)", () => {
 		});
 
 		assert.ok(runner);
-		await runner.emit({ type: "session_shutdown", reason: "shutdown" });
+		await runner.emit({ type: "session_shutdown", reason: "quit" });
 		assert.equal(shutdownEmitted, true, "session_shutdown event must trigger extension handlers");
 	});
 

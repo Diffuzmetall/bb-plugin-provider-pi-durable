@@ -306,6 +306,118 @@ async function setupRunnerModels(cwd, args2) {
   };
 }
 
+// src/runner/extension-bridge.ts
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
+import {
+  createCodemodeExtension,
+  createMcpExtension,
+  createToolSearchExtension,
+  ExtensionRunner,
+  ModelRegistry,
+  SessionManager
+} from "@earendil-works/pi-coding-agent";
+import { defineExtension as defineExtension2, defineTool } from "@earendil-works/pi-durable";
+function hasOutput(api) {
+  return typeof api === "object" && api !== null && "output" in api && typeof api.output === "function";
+}
+function configureSubagentHost(env = process.env) {
+  const key = "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT";
+  if (!env[key]?.trim()) {
+    env[key] = dirname(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))));
+  }
+}
+function createStandardExtensionFactories() {
+  return [createCodemodeExtension({ mode: "auto" }), createToolSearchExtension(), createMcpExtension()];
+}
+function adaptExtensionTool(toolDef, executeToolFn, createToolContext) {
+  return defineTool({
+    name: toolDef.name,
+    description: toolDef.description,
+    parameters: toolDef.parameters,
+    async execute(args2, api) {
+      const ctx = createToolContext ? createToolContext(api.callId) : {
+        tools: [],
+        executeTool: async (name, nestedArgs, options) => executeToolFn(api.callId, name, nestedArgs, options)
+      };
+      const result = await toolDef.execute(
+        api.callId,
+        args2,
+        void 0,
+        (update) => {
+          if (update?.content && hasOutput(api)) {
+            const textChunks = update.content.filter((c) => c.type === "text").map((c) => c.text).join("");
+            if (textChunks.length > 0) api.output(textChunks);
+          }
+        },
+        ctx
+      );
+      return {
+        content: result.content,
+        isError: result.isError,
+        details: result.details ?? void 0
+      };
+    }
+  });
+}
+function installExtensionTools(registry, tools) {
+  if (tools.length === 0) return;
+  registry.install(defineExtension2({ name: "extension-tools", tools }));
+}
+async function setupExtensionRunner(options) {
+  const sessionManager = SessionManager.inMemory(options.cwd, { id: options.sessionId });
+  const modelRegistry = new ModelRegistry(options.modelRuntime);
+  const runner = new ExtensionRunner(options.extensions, options.runtime, options.cwd, sessionManager, modelRegistry);
+  const unsupported = (operation) => {
+    throw new Error(`Pi Durable extension operation is not available: ${operation}`);
+  };
+  runner.bindCore(
+    {
+      // Preserve loader stubs for unsupported actions instead of replacing them with undefined.
+      ...options.runtime,
+      setSessionName: (name) => {
+        sessionManager.appendSessionInfo(name);
+      },
+      getSessionName: () => sessionManager.getSessionName(),
+      setLabel: (entryId, label) => {
+        sessionManager.appendLabelChange(entryId, label);
+      },
+      getActiveTools: () => [],
+      getAllTools: () => [],
+      getSettings: () => ({}),
+      refreshTools: () => {
+        options.onToolsChanged?.();
+      },
+      ...options.actions,
+      appendEntry: (customType, data) => {
+        options.actions?.appendEntry?.(customType, data);
+        sessionManager.appendCustomEntry(customType, data);
+      }
+    },
+    {
+      getModel: () => void 0,
+      getScopedModels: () => [],
+      isIdle: () => true,
+      getSignal: () => void 0,
+      abort: () => unsupported("abort before session binding"),
+      hasPendingMessages: () => false,
+      shutdown: () => unsupported("shutdown"),
+      getContextUsage: () => void 0,
+      compact: () => unsupported("compact before session binding"),
+      isProjectTrusted: () => true,
+      executeTool: (callerId, name, args2, opts) => options.executeToolFn(callerId, name, args2, opts),
+      getCallableTools: () => options.getCallableTools ? options.getCallableTools() : runner.getAllRegisteredTools().map((t) => ({
+        ...t.definition,
+        execute: (callId, args2, signal, onUpdate) => t.definition.execute(callId, args2, signal, onUpdate, runner.createToolContext(callId, signal))
+      })),
+      getSystemPrompt: () => "",
+      ...options.contextActions
+    }
+  );
+  await runner.emit({ type: "session_start", reason: options.sessionReason ?? "new" });
+  return runner;
+}
+
 // src/runner/jsonl.ts
 import { StringDecoder } from "node:string_decoder";
 function serializeJsonLine(value) {
@@ -625,91 +737,17 @@ import {
   SettingsManager as SettingsManager2
 } from "@earendil-works/pi-coding-agent";
 
-// src/runner/extension-bridge.ts
-import {
-  createCodemodeExtension,
-  createMcpExtension,
-  createToolSearchExtension,
-  ExtensionRunner,
-  ModelRegistry,
-  SessionManager
-} from "@earendil-works/pi-coding-agent";
-import { defineExtension as defineExtension2, defineTool } from "@earendil-works/pi-durable";
-function hasOutput(api) {
-  return typeof api === "object" && api !== null && "output" in api && typeof api.output === "function";
-}
-function createStandardExtensionFactories() {
-  return [createCodemodeExtension({ mode: "auto" }), createToolSearchExtension(), createMcpExtension()];
-}
-function adaptExtensionTool(toolDef, executeToolFn, createToolContext) {
-  return defineTool({
-    name: toolDef.name,
-    description: toolDef.description,
-    parameters: toolDef.parameters,
-    async execute(args2, api) {
-      const ctx = createToolContext ? createToolContext(api.callId) : {
-        tools: [],
-        executeTool: async (name, nestedArgs, options) => executeToolFn(api.callId, name, nestedArgs, options)
-      };
-      const result = await toolDef.execute(
-        api.callId,
-        args2,
-        void 0,
-        (update) => {
-          if (update?.content && hasOutput(api)) {
-            const textChunks = update.content.filter((c) => c.type === "text").map((c) => c.text).join("");
-            if (textChunks.length > 0) api.output(textChunks);
-          }
-        },
-        ctx
-      );
-      return {
-        content: result.content,
-        isError: result.isError,
-        details: result.details ?? void 0
-      };
-    }
-  });
-}
-function installExtensionTools(registry, tools) {
-  if (tools.length === 0) return;
-  registry.install(defineExtension2({ name: "extension-tools", tools }));
-}
-async function setupExtensionRunner(options) {
-  const sessionManager = SessionManager.create(options.cwd);
-  const modelRegistry = new ModelRegistry(options.modelRuntime);
-  const runner = new ExtensionRunner(options.extensions, options.runtime, options.cwd, sessionManager, modelRegistry);
-  runner.bindCore(
-    {
-      getActiveTools: () => [],
-      getAllTools: () => [],
-      getSettings: () => ({}),
-      refreshTools: () => {
-        options.onToolsChanged?.();
-      }
-    },
-    {
-      isProjectTrusted: () => true,
-      executeTool: (callerId, name, args2, opts) => options.executeToolFn(callerId, name, args2, opts),
-      getCallableTools: () => options.getCallableTools ? options.getCallableTools() : runner.getAllRegisteredTools().map((t) => ({
-        name: t.definition.name,
-        description: t.definition.description,
-        parameters: t.definition.parameters
-      })),
-      getSystemPrompt: () => ""
-    }
-  );
-  await runner.emit({ type: "session_start" });
-  return runner;
-}
-
 // src/runner/extension-mount.ts
 function createNestedToolExecutor(registry) {
   return async (callerId, name, args2) => {
+    if (args2 === null || typeof args2 !== "object" || Array.isArray(args2)) {
+      throw new TypeError(`Nested tool ${name} arguments must be a JSON object`);
+    }
+    const argumentsObject = args2;
     const target = registry.snapshot().tools().find((t) => t.tool.name === name);
     if (!target) {
       return {
-        toolCall: { type: "toolCall", id: `${callerId}/nested`, name, arguments: args2 },
+        toolCall: { type: "toolCall", id: `${callerId}/nested`, name, arguments: argumentsObject },
         result: { content: [{ type: "text", text: `Tool ${name} not found` }], details: {} },
         isError: true
       };
@@ -724,21 +762,21 @@ function createNestedToolExecutor(registry) {
       const rawContent = res.content;
       const content = Array.isArray(rawContent) ? rawContent : [{ type: "text", text: String(rawContent ?? "") }];
       return {
-        toolCall: { type: "toolCall", id: `${callerId}/nested`, name, arguments: args2 },
+        toolCall: { type: "toolCall", id: `${callerId}/nested`, name, arguments: argumentsObject },
         result: { content, details: res.details },
         isError: !!res.isError
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return {
-        toolCall: { type: "toolCall", id: `${callerId}/nested`, name, arguments: args2 },
+        toolCall: { type: "toolCall", id: `${callerId}/nested`, name, arguments: argumentsObject },
         result: { content: [{ type: "text", text: message }], details: {} },
         isError: true
       };
     }
   };
 }
-async function mountExtensionBridge(location, modelRuntime, extensionsResult, registry, executeToolFn, report) {
+async function mountExtensionBridge(location, modelRuntime, extensionsResult, registry, executeToolFn, report, bindings = {}) {
   let extensionRunner;
   try {
     const syncToolsToRegistry = () => {
@@ -753,14 +791,22 @@ async function mountExtensionBridge(location, modelRuntime, extensionsResult, re
       extensions: extensionsResult.extensions,
       runtime: extensionsResult.runtime,
       cwd: location.cwd,
+      sessionId: location.id,
+      sessionReason: location.created ? "new" : "resume",
       modelRuntime,
       executeToolFn,
       getCallableTools: () => registry.snapshot().tools().map((t) => ({
         name: t.tool.name,
+        label: t.tool.name,
         description: t.tool.description ?? "",
-        parameters: t.tool.parameters
+        parameters: t.tool.parameters,
+        execute: async (callId, args2, signal) => {
+          const outcome = await executeToolFn(callId, t.tool.name, args2, { signal });
+          return { ...outcome.result, isError: outcome.isError };
+        }
       })),
-      onToolsChanged: syncToolsToRegistry
+      onToolsChanged: syncToolsToRegistry,
+      ...bindings
     });
     syncToolsToRegistry();
   } catch (error) {
@@ -769,11 +815,103 @@ async function mountExtensionBridge(location, modelRuntime, extensionsResult, re
   return async () => {
     if (extensionRunner) {
       try {
-        await extensionRunner.emit({ type: "session_shutdown", reason: "shutdown" });
+        await extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
       } catch (err) {
         console.warn("[ExtensionBridge] Cleanup session_shutdown failed:", err);
       }
     }
+  };
+}
+
+// src/runner/extension-session.ts
+function createExtensionSessionBindings(options) {
+  let getConversation;
+  let getView;
+  let writes = Promise.resolve();
+  const startupSubmissions = [];
+  const current = () => {
+    if (!getConversation) throw new Error("Pi Durable extension session is not bound yet");
+    return getConversation();
+  };
+  const enqueue = (operation) => {
+    writes = writes.then(operation).then(() => {
+    }, options.report);
+  };
+  const submit = (draft) => {
+    if (!getConversation) {
+      startupSubmissions.push(draft);
+      return;
+    }
+    const conversation = current();
+    enqueue(() => conversation.submit(draft, runtimeContext));
+  };
+  const json = (value) => JSON.parse(JSON.stringify(value));
+  const model = () => {
+    const selected = getView?.().docs["pi.agent"]?.model;
+    const ref = selected && typeof selected === "object" && !Array.isArray(selected) && typeof selected.provider === "string" && typeof selected.modelId === "string" ? { provider: selected.provider, modelId: selected.modelId } : options.getActiveModel();
+    return ref ? options.modelRuntime.getModel(ref.provider, ref.modelId) : void 0;
+  };
+  const actions = {
+    getSettings: () => options.settingsManager.getSettings(),
+    getThinkingLevel: () => {
+      const level = getView?.().docs["pi.agent"]?.thinkingLevel;
+      return typeof level === "string" ? level : options.settingsManager.getDefaultThinkingLevel() ?? "off";
+    },
+    sendUserMessage: (content, opts) => submit({ type: "input", content, whenBusy: opts?.deliverAs ?? "followUp" }),
+    sendMessage: (message, opts) => {
+      const content = message.content;
+      const trigger = opts?.triggerTurn === true && opts.deliverAs !== "nextTurn";
+      submit({
+        type: "write",
+        entry: {
+          kind: "pi.extension.message",
+          data: json(message),
+          // Passive messages enter context without starting another generation.
+          ...trigger ? {} : { model: [{ role: "user", content, timestamp: Date.now() }] }
+        }
+      });
+      if (trigger) submit({ type: "input", content, whenBusy: opts?.deliverAs === "steer" ? "steer" : "followUp" });
+    },
+    setModel: async (selected) => {
+      if (!options.modelRuntime.getModel(selected.provider, selected.id)) return false;
+      await current().configure({ model: { provider: selected.provider, modelId: selected.id } }, runtimeContext);
+      return true;
+    },
+    appendEntry: (customType, data) => submit({
+      type: "write",
+      entry: { kind: "pi.extension.entry", data: json({ customType, data }) }
+    }),
+    setThinkingLevel: (thinkingLevel) => {
+      const conversation = current();
+      enqueue(() => conversation.configure({ thinkingLevel }, runtimeContext));
+    }
+  };
+  const contextActions = {
+    getModel: model,
+    getScopedModels: () => options.modelRuntime.getAvailableSnapshot().map((available) => ({ model: available })),
+    isIdle: () => !getView?.().docs["pi.live"]?.run,
+    hasPendingMessages: () => {
+      const items = getView?.().docs["pi.inbox"]?.items;
+      return Array.isArray(items) && items.length > 0;
+    },
+    abort: () => {
+      const conversation = current();
+      enqueue(() => conversation.abort(runtimeContext));
+    },
+    compact: (opts) => {
+      const conversation = current();
+      enqueue(() => conversation.compact(opts?.customInstructions, runtimeContext));
+    }
+  };
+  return {
+    actions,
+    contextActions,
+    bind(conversation, view) {
+      getConversation = conversation;
+      getView = view;
+      for (const draft of startupSubmissions.splice(0)) submit(draft);
+    },
+    flush: () => writes
   };
 }
 
@@ -844,6 +982,7 @@ function registerPendingProviders(modelRuntime, runtime) {
   }
 }
 async function loadHarnessEnvironment(location, options, envs) {
+  configureSubagentHost();
   const modelRuntime = await ModelRuntime2.create();
   const settingsManager = SettingsManager2.create(location.cwd);
   const resourceLoader = new DefaultResourceLoader2({
@@ -856,7 +995,8 @@ async function loadHarnessEnvironment(location, options, envs) {
   const extensionsResult = resourceLoader.getExtensions();
   registerPendingProviders(modelRuntime, extensionsResult.runtime);
   configureHarnessHttp(settingsManager);
-  let activeModelRef;
+  const initial = location.created ? await findInitialAgentModel(settingsManager, modelRuntime, options.cli) : void 0;
+  let activeModelRef = initial?.model;
   const getActiveModel = () => {
     if (activeModelRef) return activeModelRef;
     const p = settingsManager.getDefaultProvider();
@@ -871,22 +1011,22 @@ async function loadHarnessEnvironment(location, options, envs) {
   registry.install(Subagent);
   const pendingReports = [];
   const report = (error) => pendingReports.push(error);
+  const extensionSession = createExtensionSessionBindings({ modelRuntime, settingsManager, getActiveModel, report });
   const executeToolFn = createNestedToolExecutor(registry);
-  const cleanup = await mountExtensionBridge(
+  const cleanupBridge = await mountExtensionBridge(
     location,
     modelRuntime,
     extensionsResult,
     registry,
     executeToolFn,
-    report
+    report,
+    extensionSession
   );
   const harness = await Harness.open(
     await openNodeSqliteStorage(location.database),
     { models: modelRuntime, registry, settings, env: envs.env, onReport: report },
     runtimeContext
   );
-  const initial = location.created ? await findInitialAgentModel(settingsManager, modelRuntime, options.cli) : void 0;
-  if (initial?.model) activeModelRef = initial.model;
   return {
     modelRuntime,
     settingsManager,
@@ -899,7 +1039,11 @@ async function loadHarnessEnvironment(location, options, envs) {
     setActiveModelRef: (ref) => {
       activeModelRef = ref;
     },
-    cleanup
+    extensionSession,
+    cleanup: async () => {
+      await cleanupBridge();
+      await extensionSession.flush();
+    }
   };
 }
 
@@ -919,24 +1063,25 @@ async function openDurable(options = {}) {
   const location = await selectSession(options.cwd ?? process.cwd(), options.continueSession ?? false, options.session);
   const envs = new ExecutionEnvs(location.cwd);
   let harness;
+  let envState;
   try {
-    const envState2 = await loadHarnessEnvironment(location, options, envs);
-    const { modelRuntime, settingsManager } = envState2;
-    harness = envState2.harness;
+    envState = await loadHarnessEnvironment(location, options, envs);
+    const { modelRuntime, settingsManager, setActiveModelRef } = envState;
+    harness = envState.harness;
     const root = await harness.root(runtimeContext, {
       agent: {
         cwd: location.cwd,
-        ...envState2.initialModelRef ? { model: envState2.initialModelRef } : {},
-        ...envState2.initialThinkingLevel ? { thinkingLevel: envState2.initialThinkingLevel } : {}
+        ...envState.initialModelRef ? { model: envState.initialModelRef } : {},
+        ...envState.initialThinkingLevel ? { thinkingLevel: envState.initialThinkingLevel } : {}
       }
     });
     if (!location.created) {
       const rootAgent = await root.agent(runtimeContext);
-      if (rootAgent.model) envState2.setActiveModelRef(rootAgent.model);
+      if (rootAgent.model) envState.setActiveModelRef(rootAgent.model);
       if (options.cli !== void 0) {
         const cli = await findInitialAgentModel(settingsManager, modelRuntime, options.cli);
         if (cli.model) {
-          envState2.setActiveModelRef(cli.model);
+          envState.setActiveModelRef(cli.model);
           await root.configure({ model: cli.model, thinkingLevel: cli.thinkingLevel }, runtimeContext);
         } else if (cli.thinkingLevel !== void 0) {
           await root.configure({ thinkingLevel: cli.thinkingLevel }, runtimeContext);
@@ -946,6 +1091,7 @@ async function openDurable(options = {}) {
     const summaries = await loadSummaries(harness, root.id);
     let current = root;
     let conversation = await root.viewState(runtimeContext);
+    envState.extensionSession.bind(() => current, () => conversation.value);
     const enabled = settingsManager.getEnabledModels();
     const scoped = enabled?.length ? await resolveModelScopeWithDiagnostics2(enabled, modelRuntime) : void 0;
     const scopedList = scoped?.scopedModels?.length ? scoped.scopedModels.map((sm) => sm.model) : modelRuntime.getAvailableSnapshot();
@@ -973,7 +1119,7 @@ async function openDurable(options = {}) {
       update({ notices: [...state.notices, { id: nextNotice++, level, message }].slice(-20) });
     };
     const fail = (err) => notice("error", err instanceof Error ? err.message : String(err));
-    for (const err of envState2.pendingReports) notice("warning", err instanceof Error ? err.message : String(err));
+    for (const err of envState.pendingReports) notice("warning", err instanceof Error ? err.message : String(err));
     let unsubscribeConversation = conversation.subscribe((val) => update({ conversation: val }));
     const unsubscribeCommits = harness.subscribeCommits((pub) => {
       let convs = state.conversations;
@@ -1023,14 +1169,14 @@ async function openDurable(options = {}) {
         unsubscribeTasks = fn;
       },
       closeTasks,
-      setActiveModelRef: (ref) => envState2.setActiveModelRef(ref)
+      setActiveModelRef
     });
     const saved = agentOf(state.conversation).model;
     if (!saved) notice("warning", "No model configured; select one with /model.");
     else if (!modelRuntime.getModel(saved.provider, saved.modelId)) {
       notice("warning", `Saved model is unavailable: ${saved.provider}/${saved.modelId}`);
     }
-    if (envState2.fallbackMessage) notice("info", envState2.fallbackMessage);
+    if (envState.fallbackMessage) notice("info", envState.fallbackMessage);
     await controller.toggleTasks();
     harness.resume();
     let closing;
@@ -1048,6 +1194,7 @@ async function openDurable(options = {}) {
       harness,
       close() {
         return closing ??= (async () => {
+          await envState?.cleanup?.();
           unsubscribeConversation();
           unsubscribeCommits();
           conversation.dispose();
@@ -1055,7 +1202,6 @@ async function openDurable(options = {}) {
           try {
             await opened.close(runtimeContext);
             await envs.cleanup(runtimeContext);
-            await envState2.cleanup?.();
           } finally {
             await location.release();
           }
@@ -1629,6 +1775,7 @@ function output(data) {
 }
 var sendToBridge = createBridgeSender();
 async function main() {
+  configureSubagentHost();
   let activeDurable = null;
   let isTerminating = false;
   const handleExit = async (signalOrReason) => {

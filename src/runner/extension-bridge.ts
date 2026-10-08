@@ -1,4 +1,8 @@
 import type { JsonValue } from "@earendil-works/chord";
+import type { JsonObject } from "@earendil-works/pi-ai";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
 import {
 	createCodemodeExtension,
 	createMcpExtension,
@@ -8,9 +12,12 @@ import {
 	SessionManager,
 	type Extension,
 	type ExtensionFactory,
+	type ExtensionActions,
+	type ExtensionContextActions,
 	type ExtensionRuntime,
 	type ExtensionToolContext,
 	type ModelRuntime,
+	type SessionStartEvent,
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { defineExtension, defineTool, type Registry, type ToolRegistration } from "@earendil-works/pi-durable";
@@ -21,7 +28,7 @@ export type NestedToolExecutor = (
 	args: unknown,
 	options?: { signal?: AbortSignal },
 ) => Promise<{
-	toolCall: { type: "toolCall"; id: string; name: string; arguments: unknown };
+	toolCall: { type: "toolCall"; id: string; name: string; arguments: JsonObject };
 	result: { content: Array<{ type: "text"; text: string }>; details: unknown };
 	isError: boolean;
 }>;
@@ -34,6 +41,14 @@ export function hasOutput(api: unknown): api is { output(text: string): void } {
 		"output" in api &&
 		typeof (api as { output: unknown }).output === "function"
 	);
+}
+
+/** Nico's detached coordinator cannot infer its SDK host from a Durable runner argv. */
+export function configureSubagentHost(env: NodeJS.ProcessEnv = process.env): void {
+	const key = "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT";
+	if (!env[key]?.trim()) {
+		env[key] = dirname(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))));
+	}
 }
 
 /** Returns the standard built-in extension factories provided by Pi. */
@@ -95,42 +110,72 @@ export interface SetupExtensionRunnerOptions {
 	extensions: Extension[];
 	runtime: ExtensionRuntime;
 	cwd: string;
+	sessionId?: string;
+	sessionReason?: SessionStartEvent["reason"];
 	modelRuntime: ModelRuntime;
 	executeToolFn: NestedToolExecutor;
-	getCallableTools?: () => Array<{ name: string; description: string; parameters: unknown }>;
+	getCallableTools?: () => AgentTool[];
 	onToolsChanged?: () => void;
+	/** Live host callbacks, resolved at call time rather than captured at startup. */
+	actions?: Partial<ExtensionActions>;
+	contextActions?: Partial<ExtensionContextActions>;
 }
 
 /** Initializes ExtensionRunner and binds actions and nested tool execution. */
 export async function setupExtensionRunner(options: SetupExtensionRunnerOptions): Promise<ExtensionRunner> {
-	const sessionManager = SessionManager.create(options.cwd);
+	// SQLite owns persistence; the Pi facade must not manufacture a second JSONL session.
+	const sessionManager = SessionManager.inMemory(options.cwd, { id: options.sessionId });
 	const modelRegistry = new ModelRegistry(options.modelRuntime);
 	const runner = new ExtensionRunner(options.extensions, options.runtime, options.cwd, sessionManager, modelRegistry);
 
+	const unsupported = (operation: string): never => {
+		throw new Error(`Pi Durable extension operation is not available: ${operation}`);
+	};
+
 	runner.bindCore(
 		{
+			// Preserve loader stubs for unsupported actions instead of replacing them with undefined.
+			...options.runtime,
+			setSessionName: (name) => { sessionManager.appendSessionInfo(name); },
+			getSessionName: () => sessionManager.getSessionName(),
+			setLabel: (entryId, label) => { sessionManager.appendLabelChange(entryId, label); },
 			getActiveTools: () => [],
 			getAllTools: () => [],
 			getSettings: () => ({}),
 			refreshTools: () => {
 				options.onToolsChanged?.();
 			},
+			...options.actions,
+			appendEntry: (customType, data) => {
+				options.actions?.appendEntry?.(customType, data);
+				sessionManager.appendCustomEntry(customType, data);
+			},
 		},
 		{
+			getModel: () => undefined,
+			getScopedModels: () => [],
+			isIdle: () => true,
+			getSignal: () => undefined,
+			abort: () => unsupported("abort before session binding"),
+			hasPendingMessages: () => false,
+			shutdown: () => unsupported("shutdown"),
+			getContextUsage: () => undefined,
+			compact: () => unsupported("compact before session binding"),
 			isProjectTrusted: () => true,
 			executeTool: (callerId, name, args, opts) => options.executeToolFn(callerId, name, args, opts),
 			getCallableTools: () =>
 				options.getCallableTools
 					? options.getCallableTools()
 					: runner.getAllRegisteredTools().map((t) => ({
-							name: t.definition.name,
-							description: t.definition.description,
-							parameters: t.definition.parameters,
+							...t.definition,
+							execute: (callId, args, signal, onUpdate) =>
+								t.definition.execute(callId, args, signal, onUpdate, runner.createToolContext(callId, signal)),
 						})),
 			getSystemPrompt: () => "",
+			...options.contextActions,
 		},
 	);
 
-	await runner.emit({ type: "session_start" });
+	await runner.emit({ type: "session_start", reason: options.sessionReason ?? "new" });
 	return runner;
 }

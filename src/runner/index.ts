@@ -1,4 +1,5 @@
 import { setupRunnerModels } from "./model-setup.ts";
+import { configureSubagentHost } from "./extension-bridge.ts";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.ts";
 import { openDurable, type OpenDurableOptions, type OpenDurableResult } from "./runtime.ts";
 import { ROOT_CONVERSATION_ID, watchEvents } from "@earendil-works/pi-durable";
@@ -27,6 +28,8 @@ function output(data: unknown): void {
 const sendToBridge = createBridgeSender();
 
 async function main() {
+	// Model discovery also imports ambient extensions; configure the SDK before that first import.
+	configureSubagentHost();
 	let activeDurable: OpenDurableResult | null = null;
 	let isTerminating = false;
 

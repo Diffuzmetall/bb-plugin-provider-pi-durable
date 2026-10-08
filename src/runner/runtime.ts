@@ -44,10 +44,11 @@ export async function openDurable(options: OpenDurableOptions = {}): Promise<Ope
 	const location = await selectSession(options.cwd ?? process.cwd(), options.continueSession ?? false, options.session);
 	const envs = new ExecutionEnvs(location.cwd);
 	let harness: Harness | undefined;
+	let envState: Awaited<ReturnType<typeof loadHarnessEnvironment>> | undefined;
 
 	try {
-		const envState = await loadHarnessEnvironment(location, options, envs);
-		const { modelRuntime, settingsManager } = envState;
+		envState = await loadHarnessEnvironment(location, options, envs);
+		const { modelRuntime, settingsManager, setActiveModelRef } = envState;
 		harness = envState.harness;
 
 		const root = await harness.root(runtimeContext, {
@@ -75,6 +76,7 @@ export async function openDurable(options: OpenDurableOptions = {}): Promise<Ope
 		const summaries = await loadSummaries(harness, root.id);
 		let current: Conversation = root;
 		let conversation: AttachedReplicatedState<ConversationView> = await root.viewState(runtimeContext);
+		envState.extensionSession.bind(() => current, () => conversation.value);
 
 		const enabled = settingsManager.getEnabledModels();
 		const scoped = enabled?.length ? await resolveModelScopeWithDiagnostics(enabled, modelRuntime) : undefined;
@@ -145,7 +147,7 @@ export async function openDurable(options: OpenDurableOptions = {}): Promise<Ope
 			setTasks: (t) => { tasks = t; },
 			setUnsubscribeTasks: (fn) => { unsubscribeTasks = fn; },
 			closeTasks,
-			setActiveModelRef: (ref) => envState.setActiveModelRef(ref),
+			setActiveModelRef,
 		});
 
 		const saved = agentOf(state.conversation).model;
@@ -170,6 +172,7 @@ export async function openDurable(options: OpenDurableOptions = {}): Promise<Ope
 			harness,
 			close() {
 				return closing ??= (async () => {
+					await envState?.cleanup?.();
 					unsubscribeConversation();
 					unsubscribeCommits();
 					conversation.dispose();
@@ -177,7 +180,6 @@ export async function openDurable(options: OpenDurableOptions = {}): Promise<Ope
 					try {
 						await opened.close(runtimeContext);
 						await envs.cleanup(runtimeContext);
-						await envState.cleanup?.();
 					} finally {
 						await location.release();
 					}
