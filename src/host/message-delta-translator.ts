@@ -15,6 +15,7 @@ export function translateMessageUpdate(
 	asst: Record<string, unknown> | undefined,
 	state: MessageTranslationState,
 	providerOptions?: Record<string, unknown>,
+	parentRef?: string,
 ): ThreadDelta[] {
 	if (!asst) return [];
 	const deltas: ThreadDelta[] = [];
@@ -22,7 +23,7 @@ export function translateMessageUpdate(
 
 	if (asst.type === "thinking_start") {
 		const idx = typeof asst.contentIndex === "number" ? asst.contentIndex : state.currentThinkingIndex;
-		const channel = `thinking-${idx}`;
+		const channel = parentRef ? `${parentRef}:thinking-${idx}` : `thinking-${idx}`;
 		if (!state.openThinkingChannels) {
 			state.openThinkingChannels = new Set<string>();
 		}
@@ -30,8 +31,13 @@ export function translateMessageUpdate(
 			state.openThinkingChannels.add(channel);
 			deltas.push({
 				kind: "item.open",
-				key: { channel },
-				item: { type: "reasoning", summary: [], content: [] },
+				key: { channel, ...(parentRef ? { parentRef } : {}) },
+				item: {
+					type: "reasoning",
+					summary: [],
+					content: [],
+					...(parentRef ? { parentToolCallId: parentRef } : {}),
+				},
 				presentation: {
 					...REASONING_PRESENTATION,
 					...(hideThinking ? { suppress: true } : {}),
@@ -40,7 +46,7 @@ export function translateMessageUpdate(
 		}
 	} else if (asst.type === "thinking_delta" && typeof asst.delta === "string") {
 		const idx = typeof asst.contentIndex === "number" ? asst.contentIndex : state.currentThinkingIndex;
-		const channel = `thinking-${idx}`;
+		const channel = parentRef ? `${parentRef}:thinking-${idx}` : `thinking-${idx}`;
 		if (!state.openThinkingChannels) {
 			state.openThinkingChannels = new Set<string>();
 		}
@@ -48,8 +54,13 @@ export function translateMessageUpdate(
 			state.openThinkingChannels.add(channel);
 			deltas.push({
 				kind: "item.open",
-				key: { channel },
-				item: { type: "reasoning", summary: [], content: [] },
+				key: { channel, ...(parentRef ? { parentRef } : {}) },
+				item: {
+					type: "reasoning",
+					summary: [],
+					content: [],
+					...(parentRef ? { parentToolCallId: parentRef } : {}),
+				},
 				presentation: {
 					...REASONING_PRESENTATION,
 					...(hideThinking ? { suppress: true } : {}),
@@ -58,16 +69,16 @@ export function translateMessageUpdate(
 		}
 		deltas.push({
 			kind: "item.textDelta",
-			key: { channel },
+			key: { channel, ...(parentRef ? { parentRef } : {}) },
 			channel: "reasoningText",
 			text: asst.delta,
 		});
 	} else if (asst.type === "thinking_end") {
 		const idx = typeof asst.contentIndex === "number" ? asst.contentIndex : state.currentThinkingIndex;
-		const channel = `thinking-${idx}`;
+		const channel = parentRef ? `${parentRef}:thinking-${idx}` : `thinking-${idx}`;
 		deltas.push({
 			kind: "item.textClose",
-			key: { channel },
+			key: { channel, ...(parentRef ? { parentRef } : {}) },
 			channel: "reasoningText",
 			text: (asst.content as string) ?? "",
 		});
@@ -78,20 +89,30 @@ export function translateMessageUpdate(
 			for (const channel of state.openThinkingChannels) {
 				deltas.push({
 					kind: "item.textClose",
-					key: { channel },
+					key: { channel, ...(parentRef ? { parentRef } : {}) },
 					channel: "reasoningText",
 					text: "",
 				});
 			}
 			state.openThinkingChannels.clear();
 		}
-		state.currentAgentText += asst.delta;
-		deltas.push({
-			kind: "item.textDelta",
-			key: { channel: "agentMessage" },
-			channel: "agentMessage",
-			text: asst.delta,
-		});
+		if (parentRef) {
+			const channel = `${parentRef}:agentMessage`;
+			deltas.push({
+				kind: "item.textDelta",
+				key: { channel, parentRef },
+				channel: "agentMessage",
+				text: asst.delta,
+			});
+		} else {
+			state.currentAgentText += asst.delta;
+			deltas.push({
+				kind: "item.textDelta",
+				key: { channel: "agentMessage" },
+				channel: "agentMessage",
+				text: asst.delta,
+			});
+		}
 	}
 
 	return deltas;

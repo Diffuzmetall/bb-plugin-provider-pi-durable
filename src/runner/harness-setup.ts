@@ -10,6 +10,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
+import { Subagent } from "./subagent.ts";
 import {
 	type ModelRuntime,
 	type SettingsManager,
@@ -69,6 +70,7 @@ export function createCodingRegistry(
 ): Registry {
 	const registry = createRegistry();
 	registry.install(CodingTools);
+	registry.install(Subagent);
 	registry.install(createPiPrompt(settingsManager, cwd, promptOptions));
 	return registry;
 }

@@ -68,25 +68,26 @@ const KEYS = [
 ] as const;
 
 function resolveContextFiles(options: PromptOptions): Array<{ path: string; content: string }> {
-	if (options.contextFiles && options.contextFiles.length > 0) {
-		return options.contextFiles;
-	}
-	if (options.resourceLoader?.getAgentsFiles) {
-		return options.resourceLoader.getAgentsFiles()?.agentsFiles ?? [];
-	}
-	return [];
+	if (options.contextFiles && options.contextFiles.length > 0) return options.contextFiles;
+	return options.resourceLoader?.getAgentsFiles?.()?.agentsFiles ?? [];
 }
 
 function resolveSkills(options: PromptOptions): Skill[] {
 	if (options.resourceLoader?.getSkills) {
 		const res = options.resourceLoader.getSkills();
-		if (Array.isArray(res)) return res;
-		return res?.skills ?? [];
+		return Array.isArray(res) ? res : res?.skills ?? [];
 	}
 	return [];
 }
 
-function buildRules(selectedTools: string[]): string {
+interface PromptToolItem {
+	name: string;
+	description?: string;
+	promptSnippet?: string;
+	promptGuidelines?: string[];
+}
+
+function buildRules(tools: PromptToolItem[]): string {
 	const rules: string[] = [];
 	const seen = new Set<string>();
 	const addRule = (rule: string): void => {
@@ -96,16 +97,17 @@ function buildRules(selectedTools: string[]): string {
 		rules.push(normalized);
 	};
 
-	if (selectedTools.includes("bash")) {
+	if (tools.some((t) => t.name === "bash")) {
 		addRule("Use bash for file operations like ls, rg, find");
 	}
 
-	for (const name of selectedTools) {
-		const def = CANONICAL_TOOL_DEFS[name as keyof typeof CANONICAL_TOOL_DEFS];
+	for (const tool of tools) {
+		const def = CANONICAL_TOOL_DEFS[tool.name as keyof typeof CANONICAL_TOOL_DEFS];
 		if (def?.promptGuidelines) {
-			for (const guideline of def.promptGuidelines) {
-				addRule(guideline);
-			}
+			for (const guideline of def.promptGuidelines) addRule(guideline);
+		}
+		if (tool.promptGuidelines) {
+			for (const guideline of tool.promptGuidelines) addRule(guideline);
 		}
 	}
 
@@ -124,11 +126,7 @@ function tryReadPromptFile(path?: string, label?: string): string | undefined {
 	}
 }
 
-export function createPiPrompt(
-	_settings: SettingsManager,
-	fallbackCwd: string,
-	options: PromptOptions = {},
-) {
+export function createPiPrompt(_settings: SettingsManager, fallbackCwd: string, options: PromptOptions = {}) {
 	const systemPromptOverride = tryReadPromptFile(options.systemPromptPath, "system-prompt");
 	const appendPrompt = tryReadPromptFile(options.appendSystemPromptPath, "append-system-prompt");
 
@@ -136,8 +134,7 @@ export function createPiPrompt(
 		const cwd = input.env?.cwd ?? input.agent.cwd ?? fallbackCwd;
 		const contextFiles = resolveContextFiles(options);
 		const skills = resolveSkills(options);
-		const selectedTools = input.agent.tools.map((t) => t.name);
-
+		const tools = (input.agent.tools ?? []) as unknown as PromptToolItem[];
 		const sections: Record<string, string> = {};
 
 		if (systemPromptOverride) {
@@ -146,17 +143,16 @@ export function createPiPrompt(
 			sections.preamble =
 				"You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.";
 
-			const visibleTools = selectedTools
-				.filter((name) => name in CANONICAL_TOOL_DEFS)
-				.map((name) => `- ${name}: ${CANONICAL_TOOL_DEFS[name as keyof typeof CANONICAL_TOOL_DEFS].promptSnippet}`);
+			const visibleTools = tools.map((t) => {
+				const def = CANONICAL_TOOL_DEFS[t.name as keyof typeof CANONICAL_TOOL_DEFS];
+				const snippet = def?.promptSnippet ?? t.promptSnippet ?? t.description ?? "";
+				return snippet ? `- ${t.name}: ${snippet}` : `- ${t.name}`;
+			});
 			sections.tools = `<tools>\n${visibleTools.join("\n")}\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>`;
-
-			sections.rules = `<rules>\n${buildRules(selectedTools)}\n</rules>`;
+			sections.rules = `<rules>\n${buildRules(tools)}\n</rules>`;
 		}
 
-		if (appendPrompt) {
-			sections.addendum = `<addendum>\n${appendPrompt}\n</addendum>`;
-		}
+		if (appendPrompt) sections.addendum = `<addendum>\n${appendPrompt}\n</addendum>`;
 
 		if (contextFiles.length > 0) {
 			const rendered = contextFiles
@@ -165,24 +161,16 @@ export function createPiPrompt(
 			sections.project_context = `<project_context>\nProject-specific instructions and guidelines:\n\n${rendered}\n</project_context>`;
 		}
 
-		if (skills.length > 0) {
-			sections.skills = `<skills>\n${formatSkillsForPrompt(skills, "read")}\n</skills>`;
-		}
+		if (skills.length > 0) sections.skills = `<skills>\n${formatSkillsForPrompt(skills, "read")}\n</skills>`;
 
 		sections.cwd = `<cwd>\n${cwd.replace(/\\/g, "/")}\n</cwd>`;
 
 		if (options.dynamicSections) {
 			const extra = options.dynamicSections.getSections();
-			if (extra.mcp_servers && typeof extra.mcp_servers === "string" && extra.mcp_servers.trim().length > 0) {
-				sections.mcp_servers = `<mcp_servers>\n${extra.mcp_servers}\n</mcp_servers>`;
-			}
-			const otherEntries = Object.entries(extra).filter(
-				([k, text]) => k !== "mcp_servers" && Boolean(text && typeof text === "string" && text.trim().length > 0),
-			);
+			if (extra.mcp_servers?.trim()) sections.mcp_servers = `<mcp_servers>\n${extra.mcp_servers}\n</mcp_servers>`;
+			const otherEntries = Object.entries(extra).filter(([k, text]) => k !== "mcp_servers" && Boolean(text?.trim()));
 			if (otherEntries.length > 0) {
-				sections.dynamic_sections = otherEntries
-					.map(([name, text]) => `<${name}>\n${text}\n</${name}>`)
-					.join("\n\n");
+				sections.dynamic_sections = otherEntries.map(([name, text]) => `<${name}>\n${text}\n</${name}>`).join("\n\n");
 			}
 		}
 

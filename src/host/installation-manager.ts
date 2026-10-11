@@ -56,7 +56,9 @@ export function resolvePluginVersion(): string {
 				}
 			}
 		}
-	} catch {}
+	} catch (err) {
+		console.warn(`[InstallationManager] Failed to read package.json version: ${err instanceof Error ? err.message : String(err)}`);
+	}
 	return (cachedPluginVersion = "0.2.22");
 }
 
@@ -83,7 +85,10 @@ async function fetchJsonWithTimeout<T>(url: string, headers: Record<string, stri
 		const timer = setTimeout(() => controller.abort(), 2000);
 		const res = await fetchFn(url, { signal: controller.signal, headers }).finally(() => clearTimeout(timer));
 		if (res.ok) return (await res.json()) as T;
-	} catch {}
+		console.warn(`[InstallationManager] HTTP ${res.status} ${res.statusText} for ${url}`);
+	} catch (err) {
+		console.warn(`[InstallationManager] Request to ${url} failed: ${err instanceof Error ? err.message : String(err)}`);
+	}
 	return null;
 }
 

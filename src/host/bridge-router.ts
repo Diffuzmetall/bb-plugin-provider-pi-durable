@@ -4,6 +4,7 @@ import {
 	isCompactCommand,
 	extractCompactInstructions,
 } from "./prompt-input.ts";
+import { parseProviderThreadId } from "./composite-id.ts";
 
 export interface BridgeRouterContext {
 	registry: SessionRegistry;
@@ -27,6 +28,7 @@ export interface TurnStartParams {
 
 export interface TurnSteerParams {
 	threadId: string;
+	providerThreadId?: string;
 	clientRequestId?: string;
 	expectedTurnId?: string;
 	input?: unknown;
@@ -82,7 +84,51 @@ export async function handleTurnStart(
 		return;
 	}
 
-	await session.prompt(text);
+	const { conversationId } = parseProviderThreadId(providerThreadId);
+	let targetConversationId = conversationId;
+	if (!targetConversationId && typeof (session as any).findSubagentConversationForTask === "function") {
+		targetConversationId = (session as any).findSubagentConversationForTask(text);
+	}
+	const mirrorState = targetConversationId && typeof session.getSubagentState === "function"
+		? session.getSubagentState(targetConversationId)
+		: undefined;
+
+	if (mirrorState?.status === "running") {
+		if (typeof session.registerThread === "function") {
+			session.registerThread(params.threadId, targetConversationId);
+		}
+		if (params.clientRequestId && CREQ_REGEX.test(params.clientRequestId)) {
+			ctx.sendNotification("thread/delta", {
+				threadId: params.threadId,
+				deltas: [{ kind: "input.accepted", clientRequestId: params.clientRequestId }],
+			});
+		}
+		ctx.sendResult(id, { threadId: params.threadId });
+		return;
+	}
+
+	if (mirrorState?.status === "completed") {
+		if (typeof session.registerThread === "function") {
+			session.registerThread(params.threadId, targetConversationId);
+		}
+		if (typeof (session as any).consumeCompletedMirror === "function" && targetConversationId) {
+			(session as any).consumeCompletedMirror(targetConversationId);
+		}
+		if (params.clientRequestId && CREQ_REGEX.test(params.clientRequestId)) {
+			ctx.sendNotification("thread/delta", {
+				threadId: params.threadId,
+				deltas: [{ kind: "input.accepted", clientRequestId: params.clientRequestId }],
+			});
+		}
+		ctx.sendResult(id, { threadId: params.threadId });
+		ctx.sendNotification("thread/delta", {
+			threadId: params.threadId,
+			deltas: [{ kind: "turn.boundary", status: "completed" }],
+		});
+		return;
+	}
+
+	await session.prompt(text, targetConversationId);
 
 	if (params.clientRequestId && CREQ_REGEX.test(params.clientRequestId)) {
 		ctx.sendNotification("thread/delta", {
@@ -119,7 +165,9 @@ export async function handleTurnSteer(
 		return;
 	}
 
-	await session.steer(text);
+	const effectiveProviderThreadId = params.providerThreadId ?? session.options?.providerThreadId ?? params.threadId;
+	const { conversationId } = parseProviderThreadId(effectiveProviderThreadId);
+	await session.steer(text, conversationId);
 
 	if (params.clientRequestId && CREQ_REGEX.test(params.clientRequestId)) {
 		ctx.sendNotification("thread/delta", {
@@ -146,7 +194,9 @@ export async function handleThreadStop(
 				threadId: params.threadId,
 				deltas: [{ kind: "session.ended" }],
 			});
-			await session.abort();
+			const effectiveProviderThreadId = params.providerThreadId ?? session.options?.providerThreadId ?? params.threadId;
+			const { conversationId } = parseProviderThreadId(effectiveProviderThreadId);
+			await session.abort(conversationId);
 		}
 		const checkpointId = session?.getLastCheckpointId() ?? null;
 		ctx.sendResult(id, { ok: true, providerCheckpointId: checkpointId });

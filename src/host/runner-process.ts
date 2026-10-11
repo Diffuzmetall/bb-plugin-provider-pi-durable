@@ -114,8 +114,9 @@ export class RunnerProcess {
 
 		try {
 			await this.request({ type: "abort" }, Math.max(1000, Math.floor(timeoutMs / 2)));
-		} catch {
-			// ignored: process may already be terminating per AP-022
+		} catch (err) {
+			// Non-fatal if process is already terminating or unresponsive
+			console.debug?.(`[RunnerProcess] Abort request before shutdown skipped: ${err instanceof Error ? err.message : String(err)}`);
 		}
 
 		this.child.stdin?.end();
@@ -137,15 +138,21 @@ export class RunnerProcess {
 			this.exited = true;
 			try {
 				this.child.kill("SIGTERM");
-			} catch {
-				// intentionally ignored: process may already have terminated
+			} catch (err) {
+				const code = (err as NodeJS.ErrnoException)?.code;
+				if (code !== "ESRCH") {
+					console.warn(`[RunnerProcess] SIGTERM failed: ${err instanceof Error ? err.message : String(err)}`);
+				}
 			}
 			const timer = setTimeout(() => {
 				if (this.child.exitCode === null && this.child.signalCode === null) {
 					try {
 						this.child.kill("SIGKILL");
-					} catch {
-						// intentionally ignored
+					} catch (err) {
+						const code = (err as NodeJS.ErrnoException)?.code;
+						if (code !== "ESRCH") {
+							console.warn(`[RunnerProcess] SIGKILL failed: ${err instanceof Error ? err.message : String(err)}`);
+						}
 					}
 				}
 			}, 500);

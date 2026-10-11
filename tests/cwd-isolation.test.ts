@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { PiThreadSession } from "../src/host/session.ts";
 import { parseCliArgs } from "../src/runner/cli-args.ts";
 import { resolveSessionFilePath } from "../src/host/paths.ts";
-import { selectSession } from "../src/runner/upstream/session-storage.ts";
+import { selectSession } from "../src/runner/session-storage.ts";
 
 describe("CWD Isolation and CLI Argument Parsing (Issue #1)", () => {
 	it("PiThreadSession does not pass unsupported --session-dir to runner", () => {

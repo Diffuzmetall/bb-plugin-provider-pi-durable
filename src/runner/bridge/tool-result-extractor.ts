@@ -14,6 +14,7 @@ export interface ToolExecutionUpdateEventLike {
 	toolCallId: string | number;
 	toolName: string;
 	output?: { trimStart?: number; append?: string } | { set: string };
+	details?: unknown;
 }
 
 export interface ToolExecutionEndEventLike {
@@ -21,6 +22,12 @@ export interface ToolExecutionEndEventLike {
 	toolName: string;
 	entry?: EntryRecord;
 	details?: unknown;
+}
+
+const activeToolDetails = new Map<string | number, unknown>();
+
+export function clearActiveToolDetails(): void {
+	activeToolDetails.clear();
 }
 
 /**
@@ -44,7 +51,10 @@ export function extractToolResult(modelItem: unknown): { result: string; isError
 /**
  * Builds a validated BBToolExecutionUpdateEvent from a native tool execution update event.
  */
-export function buildToolExecutionUpdate(event: ToolExecutionUpdateEventLike): BBToolExecutionUpdateEvent | undefined {
+export function buildToolExecutionUpdate(
+	event: ToolExecutionUpdateEventLike,
+	parentRef?: string,
+): BBToolExecutionUpdateEvent | undefined {
 	let partialResult = "";
 	if (event.output) {
 		if ("set" in event.output) partialResult = event.output.set;
@@ -54,13 +64,18 @@ export function buildToolExecutionUpdate(event: ToolExecutionUpdateEventLike): B
 	if (event.output && "trimStart" in event.output && typeof event.output.trimStart === "number") {
 		trimStart = event.output.trimStart;
 	}
-	if (partialResult || trimStart !== undefined) {
+	if (event.details !== undefined) {
+		activeToolDetails.set(event.toolCallId, event.details);
+	}
+	if (partialResult || trimStart !== undefined || event.details !== undefined) {
 		return {
 			type: "tool_execution_update",
 			toolCallId: event.toolCallId,
 			toolName: event.toolName,
 			partialResult,
 			...(trimStart !== undefined ? { trimStart } : {}),
+			...(event.details !== undefined ? { details: event.details } : {}),
+			...(parentRef !== undefined ? { parentRef } : {}),
 		};
 	}
 	return undefined;
@@ -69,7 +84,10 @@ export function buildToolExecutionUpdate(event: ToolExecutionUpdateEventLike): B
 /**
  * Builds a validated BBToolExecutionEndEvent from a native tool execution end event.
  */
-export function buildToolExecutionEnd(event: ToolExecutionEndEventLike): BBToolExecutionEndEvent {
+export function buildToolExecutionEnd(
+	event: ToolExecutionEndEventLike,
+	parentRef?: string,
+): BBToolExecutionEndEvent {
 	if (event.entry === undefined) {
 		return {
 			type: "tool_execution_end",
@@ -77,13 +95,16 @@ export function buildToolExecutionEnd(event: ToolExecutionEndEventLike): BBToolE
 			toolName: event.toolName,
 			result: "Tool execution faulted or was orphaned without generating an entry record.",
 			isError: true,
+			...(parentRef !== undefined ? { parentRef } : {}),
 		};
 	}
 	const { result, isError } = extractToolResult(event.entry?.model?.[0]);
 	const entryData = typeof event.entry === "object" && event.entry !== null && "data" in event.entry
 		? (event.entry as { data?: unknown }).data
 		: undefined;
-	const details = entryData ?? event.details;
+	const bufferedDetails = activeToolDetails.get(event.toolCallId);
+	activeToolDetails.delete(event.toolCallId);
+	const details = entryData ?? event.details ?? bufferedDetails;
 	return {
 		type: "tool_execution_end",
 		toolCallId: event.toolCallId,
@@ -91,5 +112,6 @@ export function buildToolExecutionEnd(event: ToolExecutionEndEventLike): BBToolE
 		result,
 		isError,
 		...(details !== undefined ? { details } : {}),
+		...(parentRef !== undefined ? { parentRef } : {}),
 	};
 }

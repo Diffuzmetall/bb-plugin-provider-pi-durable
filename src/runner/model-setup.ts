@@ -33,22 +33,31 @@ export async function setupRunnerModels(cwd: string, args: CliArgs): Promise<Run
 	for (const { name, config } of extensionsResult.runtime.pendingProviderRegistrations) {
 		try {
 			modelRuntime.registerProvider(name, config);
-		} catch {
-			// intentionally ignored: provider registration may already exist or fail gracefully
+		} catch (err) {
+			const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+			if (!msg.includes("already registered") && !msg.includes("duplicate")) {
+				console.warn(`[ModelSetup] Failed to register provider ${name}: ${err instanceof Error ? err.message : String(err)}`);
+			}
 		}
 	}
 	for (const { provider } of extensionsResult.runtime.pendingNativeProviderRegistrations) {
 		try {
 			modelRuntime.registerNativeProvider(provider);
-		} catch {
-			// intentionally ignored: native provider may already be registered
+		} catch (err) {
+			const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+			if (!msg.includes("already registered") && !msg.includes("duplicate")) {
+				console.warn(`[ModelSetup] Failed to register native provider ${provider?.id}: ${err instanceof Error ? err.message : String(err)}`);
+			}
 		}
 	}
 	for (const { definition } of extensionsResult.runtime.pendingVirtualModelRegistrations) {
 		try {
 			modelRuntime.registerVirtualModel(definition);
-		} catch {
-			// intentionally ignored: virtual model may already be registered
+		} catch (err) {
+			const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+			if (!msg.includes("already registered") && !msg.includes("duplicate")) {
+				console.warn(`[ModelSetup] Failed to register virtual model ${definition?.id}: ${err instanceof Error ? err.message : String(err)}`);
+			}
 		}
 	}
 

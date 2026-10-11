@@ -41,8 +41,11 @@ function findRunnerFromDb(dbPath: string): string | null {
 		} finally {
 			db.close();
 		}
-	} catch {
-		// intentionally ignored: sqlite database locked, unreadable, or schema absent
+	} catch (err) {
+		const code = (err as NodeJS.ErrnoException)?.code;
+		if (code !== "ENOENT" && code !== "SQLITE_CANTOPEN") {
+			console.warn(`[Paths] SQLite inspection warning for ${dbPath}: ${err instanceof Error ? err.message : String(err)}`);
+		}
 	}
 	return null;
 }
@@ -65,8 +68,11 @@ function findRunnerInCache(cacheRoot: string, maxDepth = 5): string | null {
 				if (existsSync(srcCandidate)) return srcCandidate;
 				queue.push({ dir: full, depth: depth + 1 });
 			}
-		} catch {
-			// intentionally ignored: filesystem permission error during directory walk
+		} catch (err) {
+			const code = (err as NodeJS.ErrnoException)?.code;
+			if (code !== "ENOENT") {
+				console.warn(`[Paths] Directory traversal warning for ${dir}: ${err instanceof Error ? err.message : String(err)}`);
+			}
 		}
 	}
 	return null;
@@ -149,8 +155,11 @@ export function resolveRunnerPath(options?: ResolveRunnerOptions): string {
 				}
 			}
 		}
-	} catch {
-		// intentionally ignored: filesystem permission error during directory walk
+	} catch (err) {
+		const code = (err as NodeJS.ErrnoException)?.code;
+		if (code !== "ENOENT") {
+			console.warn(`[Paths] Sibling traversal warning for ${parentDir}: ${err instanceof Error ? err.message : String(err)}`);
+		}
 	}
 
 	const allSearched = [...directCandidates, `bb.db: ${bbDbPath}`, ...cacheRoots, ...bbPluginCandidates];

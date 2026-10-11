@@ -10,8 +10,11 @@ export function createBridgeSender(): (msg: unknown) => void {
 		const str = `${JSON.stringify(msg)}\n`;
 		try {
 			writeSync(CHILD_TO_BRIDGE_FD, Buffer.from(str, "utf8"));
-		} catch {
-			// intentionally ignored: FD 3 is not open or not writable
+		} catch (err) {
+			const code = (err as NodeJS.ErrnoException)?.code;
+			if (code !== "EBADF") {
+				console.warn(`[BridgeChannel] FD ${CHILD_TO_BRIDGE_FD} write warning: ${err instanceof Error ? err.message : String(err)}`);
+			}
 		}
 	};
 }
@@ -22,7 +25,12 @@ export function initBridgeInboundChannel(
 ): void {
 	try {
 		const bridgeIn = new Socket({ fd: BRIDGE_TO_CHILD_FD, readable: true, writable: false });
-		bridgeIn.on("error", () => {});
+		bridgeIn.on("error", (err) => {
+			const code = (err as NodeJS.ErrnoException)?.code;
+			if (code !== "EBADF") {
+				console.warn(`[BridgeChannel] Inbound socket warning: ${err instanceof Error ? err.message : String(err)}`);
+			}
+		});
 		bridgeIn.unref();
 
 		attachJsonlLineReader(bridgeIn, (line) => {
@@ -45,7 +53,10 @@ export function initBridgeInboundChannel(
 				console.error("[Runner] Failed to parse or process bridge channel message:", err);
 			}
 		});
-	} catch {
-		// intentionally ignored: FD 4 is not open when running without parent bridge channel
+	} catch (err) {
+		const code = (err as NodeJS.ErrnoException)?.code;
+		if (code !== "EBADF") {
+			console.warn(`[BridgeChannel] Inbound channel setup notice: ${err instanceof Error ? err.message : String(err)}`);
+		}
 	}
 }

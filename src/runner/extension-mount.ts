@@ -1,12 +1,8 @@
 import { type DefaultResourceLoader, type ModelRuntime, ExtensionRunner } from "@earendil-works/pi-coding-agent";
 import type { Registry } from "@earendil-works/pi-durable";
-import {
-	adaptExtensionTool,
-	installExtensionTools,
-	setupExtensionRunner,
-	type NestedToolExecutor,
-} from "./extension-bridge.ts";
-import type { SessionLocation } from "./upstream/session-storage.ts";
+import { adaptExtensionTool, installExtensionTools, type NestedToolExecutor } from "./tool-adapter.ts";
+import { setupExtensionRunner } from "./extension-bridge.ts";
+import type { SessionLocation } from "./session-storage.ts";
 import { runtimeContext } from "./runtime-types.ts";
 import type { DynamicSectionsHolder } from "./prompt.ts";
 
@@ -18,9 +14,22 @@ export interface MountedExtensionBridge {
 export function createNestedToolExecutor(
 	registry: Registry,
 	getExtensionRunner?: () => ExtensionRunner | undefined,
+	getEnv?: () => import("@earendil-works/pi-durable/env").ExecutionEnv | undefined,
 ): NestedToolExecutor {
-	return async (callerId, name, args) => {
-		const target = registry.snapshot().tools().find((t) => t.tool.name === name);
+	return async (callerId, name, args, options) => {
+		const runner = getExtensionRunner?.();
+		let target = registry.snapshot().tools().find((t) => t.tool.name === name);
+
+		if (!target && runner) {
+			const toolDef = runner.getAllRegisteredTools().find((t) => t.definition.name === name);
+			if (toolDef) {
+				const ctx = (callId: string) => runner.createToolContext(callId, options?.signal);
+				const adapted = adaptExtensionTool(toolDef.definition, createNestedToolExecutor(registry, getExtensionRunner, getEnv), ctx, () => runner);
+				installExtensionTools(registry, [adapted]);
+				target = registry.snapshot().tools().find((t) => t.tool.name === name);
+			}
+		}
+
 		if (!target) {
 			return {
 				toolCall: { type: "toolCall", id: `${callerId}/nested`, name, arguments: args },
@@ -29,37 +38,44 @@ export function createNestedToolExecutor(
 			};
 		}
 
-		const runner = getExtensionRunner?.();
 		if (runner?.hasHandlers("tool_call")) {
-			const hookResult = await runner.emitToolCall({
+			const hook = await runner.emitToolCall({
 				type: "tool_call",
 				toolName: name,
 				toolCallId: `${callerId}/nested`,
 				parentToolCallId: callerId,
 				input: (args ?? {}) as Record<string, unknown>,
 			});
-			if (hookResult?.block) {
+			if (hook?.block) {
 				return {
 					toolCall: { type: "toolCall", id: `${callerId}/nested`, name, arguments: args },
-					result: {
-						content: [{ type: "text", text: `Tool execution blocked: ${hookResult.reason ?? "policy"}` }],
-						details: {},
-					},
+					result: { content: [{ type: "text", text: `Tool execution blocked: ${hook.reason ?? "policy"}` }], details: {} },
 					isError: true,
 				};
 			}
 		}
 
 		try {
-			const res = await target.tool.execute(
-				args as never,
-				{ callId: `${callerId}/nested`, output: () => {} } as never,
-				runtimeContext as never,
-			);
-			const rawContent = res.content;
-			const content = Array.isArray(rawContent)
-				? (rawContent as Array<{ type: "text"; text: string }>)
-				: [{ type: "text" as const, text: String(rawContent ?? "") }];
+			const executor = target.tool.execute as (
+				args: unknown,
+				api: unknown,
+				ctx: unknown,
+			) => Promise<{ content: unknown; details?: unknown; isError?: boolean }>;
+			let outputText = "";
+			const api = {
+				callId: `${callerId}/nested`,
+				output: (chunk: string | Uint8Array) => {
+					outputText += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+				},
+				env: getEnv?.(),
+				diagnostic: () => {},
+			};
+			const res = await executor(args, api, runtimeContext);
+			const content = Array.isArray(res?.content)
+				? (res.content as Array<{ type: "text"; text: string }>)
+				: res?.content !== undefined
+					? [{ type: "text" as const, text: String(res.content) }]
+					: [{ type: "text" as const, text: outputText }];
 
 			if (runner?.hasHandlers("tool_result")) {
 				await runner.emitToolResult({
@@ -69,19 +85,18 @@ export function createNestedToolExecutor(
 					parentToolCallId: callerId,
 					input: (args ?? {}) as Record<string, unknown>,
 					content,
-					details: res.details,
-					isError: !!res.isError,
+					details: res?.details,
+					isError: !!res?.isError,
 				});
 			}
 
 			return {
 				toolCall: { type: "toolCall", id: `${callerId}/nested`, name, arguments: args },
-				result: { content, details: res.details },
-				isError: !!res.isError,
+				result: { content, details: res?.details },
+				isError: !!res?.isError,
 			};
 		} catch (err: unknown) {
-			const message = err instanceof Error ? err.message : String(err);
-			const errorContent = [{ type: "text" as const, text: message }];
+			const errorContent = [{ type: "text" as const, text: err instanceof Error ? err.message : String(err) }];
 			if (runner?.hasHandlers("tool_result")) {
 				await runner.emitToolResult({
 					type: "tool_result",
@@ -118,9 +133,8 @@ export async function mountExtensionBridge(
 	try {
 		const syncToolsToRegistry = () => {
 			if (!extensionRunner) return;
-			const createToolContext = (callId: string) => extensionRunner!.createToolContext(callId, undefined);
 			const adapted = extensionRunner.getAllRegisteredTools().map((t) =>
-				adaptExtensionTool(t.definition, executeToolFn, createToolContext, () => extensionRunner),
+				adaptExtensionTool(t.definition, executeToolFn, (callId) => extensionRunner!.createToolContext(callId, undefined), () => extensionRunner),
 			);
 			installExtensionTools(registry, adapted);
 		};
@@ -131,31 +145,41 @@ export async function mountExtensionBridge(
 			cwd: location.cwd,
 			modelRuntime,
 			executeToolFn,
-			getCallableTools: () =>
-				registry.snapshot().tools().map((t) => ({
-					name: t.tool.name,
-					description: (t.tool as { description?: string }).description ?? "",
-					parameters: t.tool.parameters,
-				})),
+			getCallableTools: () => {
+				const map = new Map<string, unknown>();
+				for (const t of registry.snapshot().tools()) {
+					map.set(t.tool.name, { name: t.tool.name, description: (t.tool as { description?: string }).description ?? "", parameters: t.tool.parameters });
+				}
+				for (const t of extensionRunner?.getAllRegisteredTools() ?? []) {
+					map.set(t.definition.name, { ...t.definition, sourceInfo: t.sourceInfo });
+				}
+				return Array.from(map.values()) as Array<{ name: string; description: string; parameters: unknown }>;
+			},
 			onToolsChanged: syncToolsToRegistry,
 			onNotice,
 			settingsManager,
 		});
 
-		try {
-			const currentTools = registry.snapshot().tools().map((t) => t.tool.name);
-			const beforeStart = await extensionRunner.emitBeforeAgentStart("", undefined, {
-				cwd: location.cwd,
-				selectedTools: currentTools,
-				sections: dynamicSections?.getSections() ?? {},
+		if (extensionRunner) {
+			extensionRunner.onError((err) => {
+				report(err);
+				onNotice?.("error", `[Extension Error] ${err.extensionPath} (${err.event}): ${err.error}`);
 			});
-			if (beforeStart?.systemPromptOptions?.sections && dynamicSections) {
-				dynamicSections.updateSections(beforeStart.systemPromptOptions.sections);
-			}
-		} catch (err) {
-			report(err);
-		}
 
+			try {
+				const currentTools = registry.snapshot().tools().map((t) => t.tool.name);
+				const beforeStart = await extensionRunner.emitBeforeAgentStart("", undefined, {
+					cwd: location.cwd,
+					selectedTools: currentTools,
+					sections: dynamicSections?.getSections() ?? {},
+				});
+				if (beforeStart?.systemPromptOptions?.sections && dynamicSections) {
+					dynamicSections.updateSections(beforeStart.systemPromptOptions.sections);
+				}
+			} catch (err) {
+				report(err);
+			}
+		}
 		syncToolsToRegistry();
 	} catch (error) {
 		report(error);
@@ -164,13 +188,7 @@ export async function mountExtensionBridge(
 	return {
 		extensionRunner,
 		cleanup: async () => {
-			if (extensionRunner) {
-				try {
-					await extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
-				} catch (err) {
-					console.warn("[ExtensionBridge] Cleanup session_shutdown failed:", err);
-				}
-			}
+			await extensionRunner?.emit({ type: "session_shutdown", reason: "quit" }).catch((err) => console.warn("[ExtensionBridge] Cleanup session_shutdown:", err));
 		},
 	};
 }

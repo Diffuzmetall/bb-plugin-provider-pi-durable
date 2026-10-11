@@ -1,4 +1,5 @@
 import { requireExtensionPath, requireScratchDir, resolveSessionDir, resolveSessionFilePath } from "./paths.ts";
+import { parseProviderThreadId } from "./composite-id.ts";
 import { PiThreadSession } from "./session.ts";
 
 export class SessionRegistry {
@@ -31,6 +32,32 @@ export class SessionRegistry {
 			this.sessions.delete(threadId);
 		}
 
+		const { sessionKey, conversationId } = parseProviderThreadId(providerThreadId);
+
+		// Shared Owner routing: check if an active session already exists for this sessionKey
+		let sharedSession: PiThreadSession | undefined;
+		for (const active of this.sessions.values()) {
+			if (!active.runner?.exited && parseProviderThreadId(active.options.providerThreadId).sessionKey === sessionKey) {
+				sharedSession = active;
+				break;
+			}
+		}
+
+		if (sharedSession) {
+			this.sessions.set(threadId, sharedSession);
+			sharedSession.registerThread?.(threadId, conversationId);
+			this.sendNotification("thread/identity", {
+				threadId,
+				providerThreadId,
+				sessionRestorable: true,
+			});
+			this.sendNotification("thread/delta", {
+				threadId,
+				deltas: [{ kind: "session.reset" }],
+			});
+			return sharedSession;
+		}
+
 		const rawModel = params.model ?? params.options?.model;
 		let resolvedModel: { provider: string; id: string } | undefined;
 		if (typeof rawModel === "string") {
@@ -47,7 +74,7 @@ export class SessionRegistry {
 		const providerOptions = params.options?.providerOptions ?? params.providerOptions;
 
 		const sessionDir = resolveSessionDir();
-		const sessionFilePath = resolveSessionFilePath(providerThreadId);
+		const sessionFilePath = resolveSessionFilePath(sessionKey);
 		const extensionPath = requireExtensionPath();
 		const scratchDir = requireScratchDir();
 
@@ -70,6 +97,7 @@ export class SessionRegistry {
 		);
 
 		await session.start();
+		session.registerThread?.(threadId, conversationId);
 		this.sessions.set(threadId, session);
 
 		// Send initial identity & reset boundary
@@ -109,14 +137,19 @@ export class SessionRegistry {
 	public async stop(threadId: string): Promise<void> {
 		const session = this.sessions.get(threadId);
 		if (session) {
+			session.unregisterThread?.(threadId);
 			this.sessions.delete(threadId);
-			await session.closeGracefully();
+			const isStillShared = Array.from(this.sessions.values()).includes(session);
+			if (!isStillShared) {
+				await session.closeGracefully();
+			}
 		}
 	}
 
 	public async stopAll(): Promise<void> {
-		for (const [threadId, session] of this.sessions.entries()) {
-			this.sessions.delete(threadId);
+		const uniqueSessions = new Set(this.sessions.values());
+		this.sessions.clear();
+		for (const session of uniqueSessions) {
 			await session.closeGracefully();
 		}
 	}

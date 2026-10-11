@@ -147,4 +147,41 @@ describe("Prompt Adapter (Cycle 61 - AP-010, AP-018)", () => {
 		assert.ok(rendered.includes("test-skill"));
 		assert.ok(rendered.includes("A test skill for verification"));
 	});
+
+	it("renders prompt guidelines for extension tools registered on input.agent.tools", () => {
+		const settings = SettingsManager.inMemory();
+		const extension = createPiPrompt(settings, "/test/cwd");
+
+		const rulesSection = extension.sections?.find((s) => s.key === "rules");
+		const toolsSection = extension.sections?.find((s) => s.key === "tools");
+		assert.ok(rulesSection);
+		assert.ok(toolsSection);
+
+		const input = {
+			conversationId: "conv_test",
+			agent: {
+				cwd: "/test/cwd",
+				tools: [
+					{ name: "read" },
+					{
+						name: "agent_spawn",
+						description: "Spawn a child agent",
+						promptGuidelines: ["Never spawn recursive cycles of agents"],
+					},
+				],
+			},
+		} as any;
+
+		const rulesRendered = rulesSection.render(input, {} as any) as string;
+		assert.ok(
+			rulesRendered.includes("Never spawn recursive cycles of agents"),
+			`rules must include agent_spawn guideline: ${rulesRendered}`,
+		);
+
+		const toolsRendered = toolsSection.render(input, {} as any) as string;
+		assert.ok(
+			toolsRendered.includes("agent_spawn: Spawn a child agent"),
+			`tools must include agent_spawn snippet: ${toolsRendered}`,
+		);
+	});
 });

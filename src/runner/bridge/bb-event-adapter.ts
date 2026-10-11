@@ -1,23 +1,16 @@
 import type { AgentEvent, SnapshotEvent } from "@earendil-works/pi-durable";
 import type { DurableView } from "../runtime.ts";
 import {
-	isAgentDocument,
-	isConversationEntryRecord,
-	type AgentDocument,
-	type ConversationEntryRecord,
 	type BBWireEvent,
 	type BBAssistantMessage,
 	type BBAssistantMessageUsage,
-	type CumulativeUsageMetrics,
 } from "./contracts.ts";
-import {
-	buildFinalAssistantMessage,
-	extractCumulativeUsage,
-} from "./assistant-message-builder.ts";
+import { resolveTurnSummary } from "./turn-summary.ts";
 import {
 	buildToolExecutionUpdate,
 	buildToolExecutionEnd,
 } from "./tool-result-extractor.ts";
+import { BBChildEventAdapter } from "./bb-child-event-adapter.ts";
 
 export { resolveToolCallArgs } from "./tool-args-resolver.ts";
 
@@ -59,42 +52,33 @@ export class BBEventAdapter {
 		});
 	}
 
-	private resolveTurnSummary(current: DurableView): {
-		finalMsg: BBAssistantMessage;
-		cw?: number;
-		cumulativeUsage?: CumulativeUsageMetrics;
-		isAborted: boolean;
-	} {
+	public createChildAdapter(parentCallId: string): BBChildEventAdapter {
+		return new BBChildEventAdapter(this.output, parentCallId);
+	}
+
+	private emitTerminal(type: "turn_end" | "agent_end", current: DurableView): void {
 		this.closeThinkingIfNeeded();
-		const tail = current?.conversation?.entries?.at(-1);
-		if (tail?.id !== undefined) {
-			this.lastCheckpointId = String(tail.id);
-		}
-		const finalMsg = this.lastAssistantMessage ?? buildFinalAssistantMessage(
+		const summary = resolveTurnSummary(
 			current,
 			this.currentText,
 			this.currentThinking,
+			this.lastAssistantMessage,
+			this.resolveContextWindow,
 		);
-		const rawAgentDoc = current?.conversation?.docs?.["pi.agent"];
-		const agentDoc: AgentDocument = isAgentDocument(rawAgentDoc) ? rawAgentDoc : {};
-		const cw = this.resolveContextWindow?.(agentDoc.model?.provider, agentDoc.model?.modelId);
-		const cumulativeUsage = extractCumulativeUsage(current);
-
-		const entries = current?.conversation?.entries ?? [];
-		const lastAssistantEntry = [...entries].reverse().find(
-			(e): e is ConversationEntryRecord => isConversationEntryRecord(e) && e.kind === "pi.assistant",
-		);
-		const firstModelMsg = lastAssistantEntry?.model?.[0];
-		const isLastAssistantAborted = Boolean(
-			firstModelMsg && "stopReason" in firstModelMsg && (firstModelMsg as { stopReason?: string }).stopReason === "aborted",
-		);
-		const isAborted = finalMsg.stopReason === "aborted" || isLastAssistantAborted;
-
-		if (isAborted && finalMsg.stopReason !== "aborted") {
-			finalMsg.stopReason = "aborted";
+		if (summary.lastCheckpointId) {
+			this.lastCheckpointId = summary.lastCheckpointId;
 		}
-
-		return { finalMsg, cw, cumulativeUsage, isAborted };
+		const base = {
+			contextWindow: summary.cw,
+			...(this.lastCheckpointId ? { providerCheckpointId: this.lastCheckpointId } : {}),
+			...(summary.cumulativeUsage ? { cumulativeUsage: summary.cumulativeUsage } : {}),
+			...(summary.isAborted ? { aborted: true, stopReason: "aborted" } : {}),
+		};
+		if (type === "turn_end") {
+			this.output({ type: "turn_end", message: summary.finalMsg, ...base });
+		} else {
+			this.output({ type: "agent_end", messages: [summary.finalMsg], ...base });
+		}
 	}
 
 	public handleEvent(event: AgentEvent, current: DurableView): void {
@@ -197,31 +181,13 @@ export class BBEventAdapter {
 				break;
 			}
 
-			case "turn_end": {
-				const { finalMsg, cw, cumulativeUsage, isAborted } = this.resolveTurnSummary(current);
-				this.output({
-					type: "turn_end",
-					message: finalMsg,
-					contextWindow: cw,
-					...(this.lastCheckpointId ? { providerCheckpointId: this.lastCheckpointId } : {}),
-					...(cumulativeUsage ? { cumulativeUsage } : {}),
-					...(isAborted ? { aborted: true, stopReason: "aborted" } : {}),
-				});
+			case "turn_end":
+				this.emitTerminal("turn_end", current);
 				break;
-			}
 
-			case "run_end": {
-				const { finalMsg, cw, cumulativeUsage, isAborted } = this.resolveTurnSummary(current);
-				this.output({
-					type: "agent_end",
-					messages: [finalMsg],
-					contextWindow: cw,
-					...(this.lastCheckpointId ? { providerCheckpointId: this.lastCheckpointId } : {}),
-					...(cumulativeUsage ? { cumulativeUsage } : {}),
-					...(isAborted ? { aborted: true, stopReason: "aborted" } : {}),
-				});
+			case "run_end":
+				this.emitTerminal("agent_end", current);
 				break;
-			}
 
 			case "auto_retry_start": {
 				this.output({

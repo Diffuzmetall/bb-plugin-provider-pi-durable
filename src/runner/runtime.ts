@@ -1,26 +1,11 @@
 import type { AttachedReplicatedState } from "@earendil-works/chord";
-import type {
-	Conversation,
-	ConversationId,
-	ConversationView,
-	Cursor,
-	Harness,
-	TaskGraph,
-} from "@earendil-works/pi-durable";
+import type { Conversation, ConversationId, ConversationView, Cursor, Harness, TaskGraph } from "@earendil-works/pi-durable";
 import { resolveModelScopeWithDiagnostics } from "@earendil-works/pi-coding-agent";
 import { ExecutionEnvs, findInitialAgentModel } from "./harness-setup.ts";
-import { selectSession } from "./upstream/session-storage.ts";
+import { selectSession } from "./session-storage.ts";
 import {
-	agentOf,
-	firstInput,
-	titleOf,
-	type ConversationSummary,
-	type DurableView,
-	type ModelSummary,
-	type Notice,
-	type OpenDurableOptions,
-	type OpenDurableResult,
-	runtimeContext,
+	agentOf, firstInput, titleOf, type ConversationSummary, type DurableView,
+	type ModelSummary, type Notice, type OpenDurableOptions, type OpenDurableResult, runtimeContext,
 } from "./runtime-types.ts";
 import { createDurableController } from "./runtime-controller.ts";
 import { loadHarnessEnvironment, type LoadedHarnessEnvironment } from "./runtime-loader.ts";

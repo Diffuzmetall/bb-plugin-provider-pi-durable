@@ -24,6 +24,20 @@ export interface RunnerCommandPayload {
 	modelId?: string;
 	instructions?: string;
 	level?: import("@earendil-works/pi-ai").ModelThinkingLevel;
+	conversationId?: string | number;
+}
+
+export function parseConversationId(id: string | number | undefined | null): import("@earendil-works/pi-durable").ConversationId {
+	if (id === undefined || id === null) return ROOT_CONVERSATION_ID;
+	const trimmed = typeof id === "string" ? id.trim() : id;
+	if (trimmed === "") {
+		throw new Error(`Invalid conversationId: ${String(id)}`);
+	}
+	const num = typeof trimmed === "number" ? trimmed : Number(trimmed);
+	if (!Number.isInteger(num) || num <= 0) {
+		throw new Error(`Invalid conversationId: ${String(id)}`);
+	}
+	return num as import("@earendil-works/pi-durable").ConversationId;
 }
 
 export async function handleActiveSessionCommand(
@@ -41,7 +55,16 @@ export async function handleActiveSessionCommand(
 			}
 			respond.success(cmd.id, "prompt");
 			const behavior = (cmd.streamingBehavior as "steer" | "followUp") || "followUp";
-			await durable.controller.submit(cmd.message, behavior);
+			const targetId = parseConversationId(cmd.conversationId);
+			if (targetId !== ROOT_CONVERSATION_ID) {
+				const conv = await durable.harness.conversation(targetId, BACKGROUND_CONTEXT);
+				if (!conv) {
+					throw new Error(`Conversation not found: ${cmd.conversationId}`);
+				}
+				await conv.submit({ type: "input", content: cmd.message, whenBusy: behavior }, BACKGROUND_CONTEXT);
+			} else {
+				await durable.controller.submit(cmd.message, behavior);
+			}
 			break;
 		}
 		case "steer": {
@@ -50,11 +73,28 @@ export async function handleActiveSessionCommand(
 				return;
 			}
 			respond.success(cmd.id, "steer");
-			await durable.controller.submit(cmd.message, "steer");
+			const targetId = parseConversationId(cmd.conversationId);
+			if (targetId !== ROOT_CONVERSATION_ID) {
+				const conv = await durable.harness.conversation(targetId, BACKGROUND_CONTEXT);
+				if (!conv) {
+					throw new Error(`Conversation not found: ${cmd.conversationId}`);
+				}
+				await conv.submit({ type: "input", content: cmd.message, whenBusy: "steer" }, BACKGROUND_CONTEXT);
+			} else {
+				await durable.controller.submit(cmd.message, "steer");
+			}
 			break;
 		}
 		case "abort": {
-			await durable.controller.abort();
+			const targetId = parseConversationId(cmd.conversationId);
+			if (targetId !== ROOT_CONVERSATION_ID) {
+				const conv = await durable.harness.conversation(targetId, BACKGROUND_CONTEXT);
+				if (conv) {
+					await conv.abort(BACKGROUND_CONTEXT);
+				}
+			} else {
+				await durable.controller.abort();
+			}
 			respond.success(cmd.id, "abort");
 			break;
 		}

@@ -2,6 +2,7 @@ import {
 	DefaultResourceLoader,
 	ModelRuntime,
 	SettingsManager,
+	initTheme,
 	type ExtensionRuntime,
 } from "@earendil-works/pi-coding-agent";
 import {
@@ -14,8 +15,7 @@ import {
 } from "./harness-setup.ts";
 import { createStandardExtensionFactories } from "./extension-bridge.ts";
 import { createNestedToolExecutor, mountExtensionBridge } from "./extension-mount.ts";
-import { getAgentDir, type SessionLocation } from "./upstream/session-storage.ts";
-import { Subagent } from "./upstream/subagent-tool.ts";
+import { getAgentDir, type SessionLocation } from "./session-storage.ts";
 import { Harness, type ModelRef } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { type OpenDurableOptions, runtimeContext } from "./runtime-types.ts";
@@ -37,15 +37,22 @@ export interface LoadedHarnessEnvironment {
 	setNoticeForwarder?: (forwarder: (level: "info" | "warning" | "error", message: string) => void) => void;
 }
 
+function logRegError(kind: string, identifier: string, err: unknown): void {
+	const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+	if (!msg.includes("already registered") && !msg.includes("duplicate")) {
+		console.warn(`[RuntimeLoader] Failed to register ${kind} '${identifier}': ${err instanceof Error ? err.message : String(err)}`);
+	}
+}
+
 function registerPendingProviders(modelRuntime: ModelRuntime, runtime: ExtensionRuntime): void {
 	for (const { name, config } of runtime.pendingProviderRegistrations) {
-		try { modelRuntime.registerProvider(name, config); } catch { /* ignore duplicate */ }
+		try { modelRuntime.registerProvider(name, config); } catch (err) { logRegError("provider", name, err); }
 	}
 	for (const { provider } of runtime.pendingNativeProviderRegistrations) {
-		try { modelRuntime.registerNativeProvider(provider); } catch { /* ignore duplicate */ }
+		try { modelRuntime.registerNativeProvider(provider); } catch (err) { logRegError("native provider", provider?.id ?? "unknown", err); }
 	}
 	for (const { definition } of runtime.pendingVirtualModelRegistrations) {
-		try { modelRuntime.registerVirtualModel(definition); } catch { /* ignore duplicate */ }
+		try { modelRuntime.registerVirtualModel(definition); } catch (err) { logRegError("virtual model", definition?.id ?? "unknown", err); }
 	}
 }
 
@@ -54,6 +61,11 @@ export async function loadHarnessEnvironment(
 	options: OpenDurableOptions,
 	envs: ExecutionEnvs,
 ): Promise<LoadedHarnessEnvironment> {
+	try {
+		initTheme();
+	} catch (err) {
+		console.warn(`[RuntimeLoader] Theme initialization warning: ${err instanceof Error ? err.message : String(err)}`);
+	}
 	const modelRuntime = await ModelRuntime.create();
 	const settingsManager = SettingsManager.create(location.cwd);
 	const resourceLoader = new DefaultResourceLoader({
@@ -83,14 +95,17 @@ export async function loadHarnessEnvironment(
 		resourceLoader,
 		dynamicSections,
 	});
-	registry.install(Subagent);
 
 	const pendingReports: unknown[] = [];
 	const report = (error: unknown) => pendingReports.push(error);
 
 	let liveNoticeForwarder: ((level: "info" | "warning" | "error", message: string) => void) | undefined;
 	let runnerRef: import("@earendil-works/pi-coding-agent").ExtensionRunner | undefined;
-	const executeToolFn = createNestedToolExecutor(registry, () => runnerRef);
+	const executeToolFn = createNestedToolExecutor(
+		registry,
+		() => runnerRef,
+		() => envs.env({ cwd: location.cwd } as unknown as import("@earendil-works/pi-durable").EnvTarget),
+	);
 	const mounted = await mountExtensionBridge(
 		location,
 		modelRuntime,

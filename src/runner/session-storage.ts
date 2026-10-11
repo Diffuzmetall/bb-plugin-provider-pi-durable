@@ -1,11 +1,6 @@
 /**
- * Upstream Shim: Imported from @earendil-works/pi-coding-agent
- * Source: packages/coding-agent/src/experimental/durable/sessions.ts
- *
- * Prototype session directory management and lockfile locking.
- * Quarantined in upstream/ until packaged natively in @earendil-works/pi-durable.
+ * Session directory management, SQLite path resolution, and lockfile locking.
  */
-
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -35,6 +30,12 @@ export function isProcessAlive(pid: number): boolean {
 	}
 }
 
+function logUnexpectedErr(err: unknown, allowedCode: string, context: string): void {
+	if ((err as NodeJS.ErrnoException)?.code !== allowedCode) {
+		console.warn(`[SessionStorage] ${context}: ${err instanceof Error ? err.message : String(err)}`);
+	}
+}
+
 async function writeOwnerFile(directory: string, owner: SessionOwnerInfo): Promise<void> {
 	await writeFile(join(directory, "session.owner.json"), JSON.stringify(owner, null, 2), "utf8");
 }
@@ -43,30 +44,25 @@ async function readOwnerFile(directory: string): Promise<SessionOwnerInfo | null
 	try {
 		const content = await readFile(join(directory, "session.owner.json"), "utf8");
 		return JSON.parse(content) as SessionOwnerInfo;
-	} catch {
+	} catch (err) {
+		logUnexpectedErr(err, "ENOENT", `Corrupted or unreadable session.owner.json in ${directory}`);
 		return null;
 	}
 }
 
 async function removeOwnerFile(directory: string): Promise<void> {
-	try {
-		await rm(join(directory, "session.owner.json"), { force: true });
-	} catch {
-		// intentionally ignored
-	}
+	await rm(join(directory, "session.owner.json"), { force: true }).catch((err) =>
+		logUnexpectedErr(err, "ENOENT", `Failed to remove owner file in ${directory}`)
+	);
 }
 
 async function forceUnlock(directory: string): Promise<void> {
-	try {
-		await lockfile.unlock(directory, { realpath: false });
-	} catch {
-		// intentionally ignored: not owned by this process
-	}
-	try {
-		await rm(`${directory}.lock`, { recursive: true, force: true });
-	} catch {
-		// intentionally ignored: directory removal error
-	}
+	await lockfile.unlock(directory, { realpath: false }).catch((err) =>
+		logUnexpectedErr(err, "ENOENT", `unlock warning for ${directory}`)
+	);
+	await rm(`${directory}.lock`, { recursive: true, force: true }).catch((err) =>
+		logUnexpectedErr(err, "ENOENT", `lockfile cleanup warning for ${directory}`)
+	);
 }
 
 async function acquireSessionLock(directory: string, cwd: string, id: string): Promise<() => Promise<void>> {
@@ -96,8 +92,8 @@ async function acquireSessionLock(directory: string, cwd: string, id: string): P
 		} else if (owner.pid !== process.pid) {
 			try {
 				process.kill(owner.pid, "SIGTERM");
-			} catch {
-				// intentionally ignored
+			} catch (err) {
+				logUnexpectedErr(err, "ESRCH", `Failed to send SIGTERM to PID ${owner.pid}`);
 			}
 
 			const deadline = Date.now() + 3000;
@@ -158,31 +154,27 @@ export async function selectSession(
 	let directory: string;
 	let created = false;
 	if (targetSession) {
-		let cleanTarget = targetSession;
-		if (cleanTarget.endsWith(".sqlite")) cleanTarget = resolve(cleanTarget, "..");
-		else if (cleanTarget.endsWith(".jsonl")) cleanTarget = cleanTarget.slice(0, -6);
-		directory = (cleanTarget.includes("/") || cleanTarget.includes("\\")) ? resolve(cleanTarget) : join(root, cleanTarget);
+		let clean = targetSession;
+		if (clean.endsWith(".sqlite")) clean = resolve(clean, "..");
+		else if (clean.endsWith(".jsonl")) clean = clean.slice(0, -6);
+		directory = (clean.includes("/") || clean.includes("\\")) ? resolve(clean) : join(root, clean);
 		try {
 			await mkdir(directory, { recursive: true });
 			const entries = await readdir(directory);
 			if (!entries.includes("session.sqlite")) {
 				const legacyDir = `${directory}.jsonl`;
 				try {
-					const legacyEntries = await readdir(legacyDir);
-					if (legacyEntries.includes("session.sqlite")) {
+					const legEntries = await readdir(legacyDir);
+					if (legEntries.includes("session.sqlite")) {
 						directory = legacyDir;
-						created = false;
-					} else {
-						created = true;
-					}
-				} catch {
+					} else created = true;
+				} catch (err) {
+					logUnexpectedErr(err, "ENOENT", `Legacy session check failed in ${legacyDir}`);
 					created = true;
 				}
-			} else {
-				created = false;
 			}
-		} catch {
-			created = false;
+		} catch (err) {
+			logUnexpectedErr(err, "ENOENT", `Directory inspection failed in ${directory}`);
 		}
 	} else if (continueSession) {
 		const entries = await readdir(root, { withFileTypes: true });

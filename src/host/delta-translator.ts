@@ -82,7 +82,10 @@ export class DeltaTranslator {
 
 			case "message_update": {
 				const asst = event.assistantMessageEvent as Record<string, unknown> | undefined;
-				deltas.push(...translateMessageUpdate(asst, this, ctx.providerOptions));
+				const parentRef = event.parentRef
+					? String(event.parentRef)
+					: (event.parentToolCallId ? String(event.parentToolCallId) : undefined);
+				deltas.push(...translateMessageUpdate(asst, this, ctx.providerOptions, parentRef));
 				break;
 			}
 
@@ -102,6 +105,14 @@ export class DeltaTranslator {
 			}
 
 			case "tool_execution_update": {
+				const callId = String(event.toolCallId);
+				const cached = this.activeTools.get(callId);
+				if (cached && event.details && typeof event.details === "object") {
+					const detailsObj = event.details as Record<string, unknown>;
+					if (detailsObj.conversationId !== undefined && detailsObj.conversationId !== null) {
+						cached.childRef = String(detailsObj.conversationId);
+					}
+				}
 				const delta = translateToolUpdate(event);
 				if (delta) deltas.push(delta);
 				break;

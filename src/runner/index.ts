@@ -1,14 +1,13 @@
 import { setupRunnerModels } from "./model-setup.ts";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.ts";
 import { openDurable, type OpenDurableOptions, type OpenDurableResult } from "./runtime.ts";
-import { ROOT_CONVERSATION_ID, watchEvents } from "@earendil-works/pi-durable";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { BBEventAdapter } from "./bridge/bb-event-adapter.ts";
 import type { BBWireEvent } from "./bridge/contracts.ts";
 import { parseCliArgs } from "./cli-args.ts";
 import { handleActiveSessionCommand, type RunnerCommandPayload } from "./session-commands.ts";
 import { getPiDurableVersion } from "./version.ts";
 import { createBridgeSender, initBridgeInboundChannel } from "./bridge-channel.ts";
+import { startSubagentWatcher, type SubagentWatcherController } from "./subagent-watcher.ts";
 
 const argv = process.argv.slice(2);
 
@@ -28,11 +27,19 @@ const sendToBridge = createBridgeSender();
 
 async function main() {
 	let activeDurable: OpenDurableResult | null = null;
+	let activeWatcher: SubagentWatcherController | null = null;
 	let isTerminating = false;
 
 	const handleExit = async (signalOrReason: string) => {
 		if (isTerminating) return;
 		isTerminating = true;
+		if (activeWatcher) {
+			try {
+				activeWatcher.close();
+			} catch (err) {
+				console.warn(`[Runner] Error closing subagent watcher on ${signalOrReason}: ${err instanceof Error ? err.message : String(err)}`);
+			}
+		}
 		if (activeDurable) {
 			try {
 				await activeDurable.close();
@@ -115,7 +122,7 @@ async function main() {
 	const durable = await openDurable(durableOptions);
 	activeDurable = durable;
 
-	// Setup native Pi Durable event stream adapter
+	// Setup native Pi Durable event stream adapter with subagent multiplexing
 	const adapter = new BBEventAdapter(
 		(evt: BBWireEvent) => output(evt),
 		(provider, modelId) => {
@@ -124,16 +131,8 @@ async function main() {
 			return p && m ? modelRuntime.getModel(p, m)?.contextWindow : undefined;
 		},
 	);
-	const stream = await watchEvents(durable.harness, ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT);
-	stream.start(async (batch) => {
-		try {
-			for (const event of batch) {
-				adapter.handleEvent(event, durable.view.current());
-			}
-		} catch (err) {
-			console.error(`Adapter stream error: ${err}`);
-		}
-	});
+	const watcher = await startSubagentWatcher(durable.harness, adapter, () => durable.view.current());
+	activeWatcher = watcher;
 
 	// Handle stdin RPC commands in active session
 	attachJsonlLineReader(process.stdin, async (line) => {

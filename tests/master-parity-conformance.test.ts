@@ -20,7 +20,7 @@ import type { BBToolExecutionUpdateEvent, BBWireEvent } from "../src/runner/brid
 import type { DurableView } from "../src/runner/runtime-types.ts";
 import { DynamicPromptSections, createPiPrompt } from "../src/runner/prompt.ts";
 import { adaptExtensionTool } from "../src/runner/extension-bridge.ts";
-import { isProcessAlive } from "../src/runner/upstream/session-storage.ts";
+import { isProcessAlive } from "../src/runner/session-storage.ts";
 
 test("D-1, D-2, D-3, D-4: Thinking presentation, reasoning lifecycle & settings schema parity", () => {
 	let settingsSchema: Record<string, unknown> | undefined;

@@ -33,8 +33,12 @@ export class ModelCatalog {
 				}
 			};
 		});
-		// intentionally ignored: prevent unhandledRejection if readyPromise rejects before caller awaits start()
-		promise.catch(() => {});
+		// Retain error trace if startup rejects before caller awaits start()
+		promise.catch((err: unknown) => {
+			if (process.env.DEBUG_STARTUP) {
+				console.debug(`[Catalog] Early startup rejection: ${err instanceof Error ? err.message : String(err)}`);
+			}
+		});
 		return promise;
 	}
 

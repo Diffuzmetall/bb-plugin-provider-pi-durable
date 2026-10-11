@@ -58,6 +58,40 @@ test("buildToolItemShape maps 'subagent' tool to BB compliant delegation shape",
 	assert.equal(customChildRefShape.childRef, "child-ref-2");
 });
 
+test("buildToolItemShape maps 'agent_spawn' tool to BB compliant delegation shape", () => {
+	const spawnShape = buildToolItemShape(
+		"agent_spawn",
+		{ name: "reviewer", task: "Review architecture rules" },
+		"/Users/vanya",
+	);
+	assert.equal(spawnShape.type, "delegation");
+	assert.equal(spawnShape.childRef, "reviewer");
+	assert.equal(spawnShape.label, "Review architecture rules");
+	assert.equal(spawnShape.summary, "Review architecture rules");
+
+	const spawnDefault = buildToolItemShape("agent_spawn", {}, "/Users/vanya");
+	assert.equal(spawnDefault.type, "delegation");
+	assert.equal(spawnDefault.childRef, "agent");
+	assert.equal(spawnDefault.label, "Agent delegation");
+});
+
+test("buildToolItemShape maps 'agent_spawn_graph' tool to BB compliant delegation shape", () => {
+	const graphShape = buildToolItemShape(
+		"agent_spawn_graph",
+		{
+			name: "audit-pipeline",
+			agents: [
+				{ name: "scanner", task: "Scan vulnerabilities" },
+				{ name: "reporter", task: "Generate report" },
+			],
+		},
+		"/Users/vanya",
+	);
+	assert.equal(graphShape.type, "delegation");
+	assert.equal(graphShape.childRef, "audit-pipeline");
+	assert.ok(graphShape.label.includes("audit-pipeline") || graphShape.label.includes("Graph"));
+});
+
 test("translateToolStart emits item.open with delegation shape and Bot icon presentation", () => {
 	const start = translateToolStart(
 		{

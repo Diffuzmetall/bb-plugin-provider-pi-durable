@@ -6,7 +6,7 @@ import {
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { createStandardExtensionFactories, setupExtensionRunner } from "./extension-bridge.ts";
-import { getAgentDir } from "./upstream/session-storage.ts";
+import { getAgentDir } from "./session-storage.ts";
 import { resolvePluginVersion } from "../host/installation-manager.ts";
 import { getPiDurableVersion } from "./version.ts";
 import {
@@ -25,8 +25,11 @@ function checkPath(fullPath: string, type: "file" | "directory", required: boole
 		try {
 			const stat = statSync(fullPath);
 			actualType = stat.isDirectory() ? "directory" : "file";
-		} catch {
-			/* ignore stat failure */
+		} catch (err) {
+			const code = (err as NodeJS.ErrnoException)?.code;
+			if (code !== "ENOENT") {
+				console.warn(`[Diagnostics] statSync warning for ${fullPath}: ${err instanceof Error ? err.message : String(err)}`);
+			}
 		}
 	}
 	return { path: fullPath, exists, type: actualType, required };
@@ -103,8 +106,8 @@ export async function inspectPiEnvironment(options: { cwd?: string; agentDir?: s
 			.filter((t) => !t.definition.name.startsWith("mcp__") && !["codemode", "tool_search"].includes(t.definition.name))
 			.map((t) => t.definition.name);
 		await runner.emit({ type: "session_shutdown", reason: "quit" });
-	} catch {
-		/* ignore probe runner shutdown error */
+	} catch (err) {
+		console.warn(`[Diagnostics] Probe runner inspection notice: ${err instanceof Error ? err.message : String(err)}`);
 	}
 
 	const systemTools = ["read", "write", "edit", "bash", "subagent", "codemode", "tool_search"];

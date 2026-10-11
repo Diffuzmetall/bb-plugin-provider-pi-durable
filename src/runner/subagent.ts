@@ -1,11 +1,3 @@
-/**
- * Upstream Shim: Imported from @earendil-works/pi-coding-agent
- * Source: packages/coding-agent/src/experimental/durable/subagent.ts
- *
- * Prototype foreground subagent tool for Durable SQLite Harness.
- * Quarantined in upstream/ until packaged natively in @earendil-works/pi-durable.
- */
-
 import type { Context } from "@earendil-works/chord";
 import { type AssistantMessage, Type } from "@earendil-works/pi-ai";
 import {
@@ -26,7 +18,8 @@ async function answerText(api: ToolExecutionApi, answer: EntryId, context: Conte
 
 /**
  * A foreground subagent: each call creates a child conversation owned by the call's task, runs the task there, and
- * returns the child's answer.
+ * returns the child's answer. Aborting the call aborts the child. The child outlives the call, so the user can switch
+ * to it and keep talking.
  */
 export const Subagent: Extension = defineExtension({
 	name: "subagent",
@@ -45,10 +38,14 @@ export const Subagent: Extension = defineExtension({
 					await configure(tx, created.id, { extensions: { remove: [Subagent] } });
 					return created.id;
 				}, context);
-				await api.details({ conversationId: child }, context);
-				const handle = (await api.conversation(child, context))!;
+				await api.details({ conversationId: child, task: args.task }, context);
+				const handle = await api.conversation(child, context);
+				if (!handle) {
+					throw new Error(`Failed to access subagent conversation: ${child}`);
+				}
 				const request = { type: "input", content: args.task, requestId: `subagent:${api.taskId}` } as const;
-				const settled = await (await handle.submit(request, context)).wait(context);
+				const submission = await handle.submit(request, context);
+				const settled = await submission.wait(context);
 				if (settled.status !== "done" || settled.type !== "input") {
 					throw new Error(`Subagent ${child} failed: ${settled.status}`);
 				}

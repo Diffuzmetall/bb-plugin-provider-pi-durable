@@ -13,6 +13,10 @@ interface RawEditItem {
 	newText?: unknown;
 }
 
+function isDelegationTool(name: string): boolean {
+	return name === "subagent" || name === "agent_spawn" || name === "agent_spawn_graph";
+}
+
 /**
  * Translates tool execution events into BB thread deltas.
  */
@@ -29,10 +33,15 @@ export function buildToolItemShape(
 		};
 	}
 
-	if (toolName === "subagent") {
-		const task = typeof args.task === "string" ? args.task : "";
-		const label = task.length > 80 ? `${task.slice(0, 77)}...` : task || "Subagent delegation";
-		const childRef = String(args.conversationId || args.childRef || "subagent");
+	if (isDelegationTool(toolName)) {
+		let task = typeof args.task === "string" ? args.task : "";
+		const name = typeof args.name === "string" ? args.name : "";
+		if (!task && Array.isArray(args.agents) && args.agents.length > 0) {
+			task = `Graph: ${name || "pipeline"} (${args.agents.length} agents)`;
+		}
+		const defaultLabel = toolName === "agent_spawn_graph" ? `Graph: ${name || "pipeline"}` : (toolName === "subagent" ? "Subagent delegation" : "Agent delegation");
+		const label = task ? (task.length > 80 ? `${task.slice(0, 77)}...` : task) : defaultLabel;
+		const childRef = String(args.conversationId || args.childRef || name || (toolName === "subagent" ? "subagent" : "agent"));
 		return {
 			type: "delegation",
 			childRef,
@@ -106,10 +115,19 @@ export function translateToolStart(
 		? getDelegationPresentation(shape.label)
 		: undefined;
 
+	const parentRef = event.parentRef
+		? String(event.parentRef)
+		: (event.parentToolCallId ? String(event.parentToolCallId) : undefined);
 	const delta: ThreadDelta = {
 		kind: "item.open",
-		key: { providerItemId: callId },
-		item: shape,
+		key: {
+			providerItemId: callId,
+			...(parentRef ? { parentRef } : {}),
+		},
+		item: {
+			...shape,
+			...(parentRef ? { parentToolCallId: parentRef } : {}),
+		},
 		...(presentation ? { presentation } : {}),
 	};
 	return { shape, delta };
@@ -118,19 +136,28 @@ export function translateToolStart(
 export function translateToolUpdate(event: RunnerEvent): ThreadDelta | null {
 	const callId = String(event.toolCallId);
 	const toolName = String(event.toolName);
+	const parentRef = event.parentRef
+		? String(event.parentRef)
+		: (event.parentToolCallId ? String(event.parentToolCallId) : undefined);
 	if (!event.partialResult) return null;
 
 	if (toolName === "bash") {
 		return {
 			kind: "command.outputSnapshot",
-			key: { providerItemId: callId },
+			key: {
+				providerItemId: callId,
+				...(parentRef ? { parentRef } : {}),
+			},
 			text: String(event.partialResult),
 		};
 	}
 
 	return {
 		kind: "item.progress",
-		key: { providerItemId: callId },
+		key: {
+			providerItemId: callId,
+			...(parentRef ? { parentRef } : {}),
+		},
 		message: String(event.partialResult),
 	};
 }
@@ -142,12 +169,13 @@ export function translateToolEnd(
 ): ThreadDelta {
 	const callId = String(event.toolCallId);
 	const toolName = String(event.toolName);
+	const isDelegation = isDelegationTool(toolName);
 	const shape = cachedShape ?? {
-		type: toolName === "bash" ? "command" : toolName === "subagent" ? "delegation" : "tool",
+		type: toolName === "bash" ? "command" : isDelegation ? "delegation" : "tool",
 		...(toolName === "bash"
 			? { command: "", cwd: fallbackCwd }
-			: toolName === "subagent"
-				? { childRef: "subagent", label: "Subagent delegation", background: false }
+			: isDelegation
+				? { childRef: "agent", label: "Agent delegation", background: false }
 				: { tool: toolName, server: "pi" }),
 	};
 
@@ -187,15 +215,25 @@ export function translateToolEnd(
 		? getDelegationPresentation(item.label)
 		: undefined;
 
+	const parentRef = event.parentRef
+		? String(event.parentRef)
+		: (event.parentToolCallId ? String(event.parentToolCallId) : undefined);
+
 	return {
 		kind: "item.close",
-		key: { providerItemId: callId },
+		key: {
+			providerItemId: callId,
+			...(parentRef ? { parentRef } : {}),
+		},
 		status: isError ? "failed" : "completed",
 		exitCode: isError ? 1 : 0,
 		resultText,
 		aggregatedOutput: item.type === "command" ? resultText : undefined,
 		...(isError ? { error: { message: resultText } } : {}),
-		item,
+		item: {
+			...item,
+			...(parentRef ? { parentToolCallId: parentRef } : {}),
+		},
 		...(presentation ? { presentation } : {}),
 	};
 }

@@ -30,8 +30,12 @@ export function createReadyDeferred(): ReadyDeferred {
 			}
 		};
 	});
-	// prevent unhandledRejection if ready rejects before caller awaits start()
-	promise.catch(() => {});
+	// Retain error trace if startup rejects before caller awaits start()
+	promise.catch((err: unknown) => {
+		if (process.env.DEBUG_STARTUP) {
+			console.debug(`[SessionTelemetry] Early startup rejection: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	});
 
 	return { promise, resolve: resolveFn, reject: rejectFn };
 }
