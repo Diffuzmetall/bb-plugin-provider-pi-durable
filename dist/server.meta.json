@@ -3,7 +3,7 @@
   "sdkVersion": "0.6.37",
   "artifactFormatVersion": 1,
   "pluginId": "provider-pi-durable",
-  "pluginVersion": "0.2.22",
+  "pluginVersion": "0.2.28",
   "builtWith": {
     "bbVersion": "0.46.0",
     "pluginSdkVersion": "0.6.37"
