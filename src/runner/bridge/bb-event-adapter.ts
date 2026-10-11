@@ -35,10 +35,7 @@ export class BBEventAdapter {
 	private currentThinking = "";
 	private isInThinking = false;
 
-	constructor(
-		output: (event: BBWireEvent) => void,
-		resolveContextWindow?: (provider?: string, modelId?: string) => number | undefined,
-	) {
+	constructor(output: (event: BBWireEvent) => void, resolveContextWindow?: (p?: string, m?: string) => number | undefined) {
 		this.output = output;
 		this.resolveContextWindow = resolveContextWindow;
 	}
@@ -46,10 +43,7 @@ export class BBEventAdapter {
 	private closeThinkingIfNeeded(): void {
 		if (!this.isInThinking) return;
 		this.isInThinking = false;
-		this.output({
-			type: "message_update",
-			assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: this.currentThinking },
-		});
+		this.output({ type: "message_update", assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: this.currentThinking } });
 	}
 
 	public createChildAdapter(parentCallId: string): BBChildEventAdapter {
@@ -172,24 +166,19 @@ export class BBEventAdapter {
 				break;
 			}
 
-			case "compaction_start": {
+			case "compaction_start":
 				this.output({ type: "compaction_start", reason: event.reason === "threshold" ? "threshold" : "manual" });
 				break;
-			}
-			case "compaction_end": {
+			case "compaction_end":
 				this.output({ type: "compaction_end", reason: event.reason === "threshold" ? "threshold" : "manual", aborted: false });
 				break;
-			}
-
 			case "turn_end":
 				this.emitTerminal("turn_end", current);
 				break;
-
 			case "run_end":
 				this.emitTerminal("agent_end", current);
 				break;
-
-			case "auto_retry_start": {
+			case "auto_retry_start":
 				this.output({
 					type: "auto_retry_start",
 					attempt: event.attempt,
@@ -197,11 +186,9 @@ export class BBEventAdapter {
 					...(event.errorMessage ? { errorMessage: event.errorMessage } : {}),
 				});
 				break;
-			}
-			case "auto_retry_end": {
+			case "auto_retry_end":
 				this.output({ type: "auto_retry_end", attempt: event.attempt });
 				break;
-			}
 		}
 	}
 }

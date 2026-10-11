@@ -42,11 +42,12 @@ export function buildToolItemShape(
 		const defaultLabel = toolName === "agent_spawn_graph" ? `Graph: ${name || "pipeline"}` : (toolName === "subagent" ? "Subagent delegation" : "Agent delegation");
 		const label = task ? (task.length > 80 ? `${task.slice(0, 77)}...` : task) : defaultLabel;
 		const childRef = String(args.conversationId || args.childRef || name || (toolName === "subagent" ? "subagent" : "agent"));
+		const isBackground = args.background !== false;
 		return {
 			type: "delegation",
 			childRef,
 			label,
-			background: false,
+			background: isBackground,
 			summary: task || undefined,
 		};
 	}
@@ -204,10 +205,14 @@ export function translateToolEnd(
 		const summary = resultText
 			? (resultText.length > 300 ? `${resultText.slice(0, 297)}...` : resultText)
 			: (typeof item.summary === "string" ? item.summary : undefined);
+		const background = detailsObj?.background !== undefined
+			? Boolean(detailsObj.background)
+			: (item.background ?? true);
 		item = {
 			...item,
 			childRef,
 			summary,
+			background,
 		};
 	}
 

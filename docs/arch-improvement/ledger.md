@@ -344,6 +344,47 @@
 - Артефакты синхронизированы в кеш BB (`~/.bb/plugins/cache/.../dist/`).
 - `bb plugin reload provider-pi-durable`: Перезагрузка успешна, статус `running`.
 
+---
+
+## Cycle 89: Async Non-Blocking Subagents, Role Envelopes & BB Subthread Parity
+
+**Goal:** Перевести запуск сабагентов на неблокирующий режим (`background: true`) по умолчанию, инжектировать строгий Role Envelope в системные инструкции сабагентов для предотвращения исследовательских петель, устранить искусственные ограничения на вложенность и обеспечить 100% корректный маппинг проекта в Beyond Boundaries.
+
+### 1. Triaged Findings & Dispositions
+
+| ID | Issue / Component | Severity | Rule | Disposition | Root Cause & Resolution |
+|---|---|---|---|---|---|
+| **F-89-1** | Блокирующий синхронный вызов `submission.wait()` в `src/runner/subagent.ts` | **P1** | AP-010, AP-034 | `fix-now` | Вызов `subagent` блокировал родительский тред и чат на все время работы ребенка. Реализован неблокирующий запуск по умолчанию (`background: true`): моментальный возврат статуса с фоновым исполнением в SQLite и сабтреде BB. |
+| **F-89-2** | Отсутствие ролевых инструкций сабагента в `src/runner/subagent.ts` | **P1** | AP-012, AP-026 | `fix-now` | Ребенок считал себя главным архитектором и при отсутствии тула уходил в мета-исследование репозитория. Внедрен `buildRoleEnvelope` через `configure(tx, created.id, { instructions })`. |
+| **F-89-3** | Насильное вырезание `remove: [Subagent]` в `src/runner/subagent.ts` | **P1** | AP-010, AP-012 | `fix-now` | Строка `extensions: { remove: [Subagent] }` ломала вложенность уровня 2+. Вырезание полностью удалено; сабагенты нативно поддерживают вложенность. |
+| **F-89-4** | Несогласованность флага `background` в карточке делегации | **P2** | AP-020, AP-026 | `fix-now` | В `buildToolItemShape` и `tool-delta-translator.ts` карточка делегации теперь отражает `background: true` по умолчанию. |
+| **F-89-5** | Хардкод проекта `proj_personal` при спавне дочерних тредов | **P2** | AP-020, AP-034 | `fix-now` | В `subthread-spawner.ts` внедрено чтение `project_id` родительского треда напрямую из `~/.bb/bb.db` через встроенный `node:sqlite DatabaseSync`, исключая попадание в неверный проект. |
+
+### 2. Architecture Implementations
+- **`src/runner/subagent.ts` (92 строки, AP-019 < 200):**
+  - Поддержка `background: Type.Optional(Type.Boolean({ default: true }))`.
+  - Ролевой конверт `buildRoleEnvelope(task)`.
+  - Мгновенный возврат при `background: true` без блокировки `submission.wait()`.
+- **`src/host/tool-delta-translator.ts` (244 строки, AP-019 < 250):**
+  - Учет `background` в `buildToolItemShape` и `translateToolEnd`.
+- **`src/host/subthread-spawner.ts` (97 строк, AP-019 < 250):**
+  - Разрешение `projectId` родительского треда из `~/.bb/bb.db`.
+- **`src/runner/bridge/bb-event-adapter.ts` (194 строки, AP-019 < 200):**
+  - Компактный роутинг терминальных событий и компакшена для строгого соблюдения лимита AP-019.
+
+### 3. Verification Evidence
+- `npx tsc --noEmit`: **0 errors (exit code 0)**.
+- `npm test`: **202 / 202 passing assertions across 12 test suites (0 failures, 0 skips)**.
+  - `tests/subagent-async-envelope.test.ts` (4/4 pass).
+  - `tests/subagent-background-delegation.test.ts` (3/3 pass).
+  - `tests/host-subthread-background-spawner.test.ts` (2/2 pass).
+- `npm run build`: Сборка успешна (`dist/runner/index.js`, `dist/server.js`, `dist/host.js`).
+- `npm run doctor`: **7 System Tools, 6 Extension Tools, 8 Loaded Extensions**.
+- Строгое соблюдение AP-019: **100% файлов в `src/runner/` < 200 строк, 100% файлов в `src/host/` < 250 строк**.
+- Артефакты синхронизированы в кеш BB (`~/.bb/plugins/cache/.../dist/`).
+- `bb plugin reload provider-pi-durable`: Перезагрузка успешна, статус `running`.
+
+
 
 
 

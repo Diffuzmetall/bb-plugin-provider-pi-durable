@@ -17,7 +17,7 @@ test("buildToolItemShape maps 'subagent' tool to BB compliant delegation shape",
 	assert.equal(shortShape.type, "delegation");
 	assert.equal(shortShape.childRef, "subagent");
 	assert.equal(shortShape.label, "Investigate database performance");
-	assert.equal(shortShape.background, false);
+	assert.equal(shortShape.background, true);
 	assert.equal(shortShape.summary, "Investigate database performance");
 
 	// Long task (> 80 characters) truncation for label, full for summary
@@ -38,7 +38,7 @@ test("buildToolItemShape maps 'subagent' tool to BB compliant delegation shape",
 	assert.equal(emptyShape.type, "delegation");
 	assert.equal(emptyShape.label, "Subagent delegation");
 	assert.equal(emptyShape.childRef, "subagent");
-	assert.equal(emptyShape.background, false);
+	assert.equal(emptyShape.background, true);
 	assert.equal(emptyShape.summary, undefined);
 
 	// Explicit conversationId in args
@@ -108,7 +108,7 @@ test("translateToolStart emits item.open with delegation shape and Bot icon pres
 	assert.equal(start.shape.type, "delegation");
 	assert.equal(start.shape.label, "Run lint and review code changes");
 	assert.equal(start.shape.childRef, "subagent");
-	assert.equal(start.shape.background, false);
+	assert.equal(start.shape.background, true);
 
 	const presentation = start.delta.presentation as Record<string, unknown>;
 	assert.ok(presentation, "presentation must be present for delegation item.open");
@@ -159,7 +159,7 @@ test("translateToolEnd updates childRef from event.details.conversationId and co
 	assert.equal(item.childRef, "conv-resolved-42");
 	assert.equal(item.label, "Perform architectural review");
 	assert.equal(item.summary, "Architectural review finished: 0 findings.");
-	assert.equal(item.background, false);
+	assert.equal(item.background, true);
 
 	const presentation = endDelta.presentation as Record<string, unknown>;
 	assert.ok(presentation, "presentation must be preserved on item.close for delegation");

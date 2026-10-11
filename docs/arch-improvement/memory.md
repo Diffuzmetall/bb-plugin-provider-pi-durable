@@ -49,6 +49,14 @@
 - Use next time: Strictly follow Ports & Adapters. The runner only emits structured task metadata (`api.details({ conversationId, task })`). The Host Bridge (`src/host/subthread-spawner.ts`), which lives in the BB platform environment, intercepts the event and orchestrates the creation of the child thread, linking it to the active session mirror.
 - Evidence: `src/runner/subagent.ts`, `src/host/subthread-spawner.ts`, `tests/host-subthread-spawner.test.ts`, `tests/subagent-timeline-ordering.test.ts`.
 
+## 2026-10-12 - Async Subagents, Role Envelopes & Removing Toy Upstream Limits
+- Context: Subagent exploratory loops and blocking parent freezes (Cycle 89).
+- Symptom: Child subagent called with level 2 nesting went into a 20-turn exploratory spiral calling `tool_search`, `codemode`, `find`, `git status`, and `read`, freezing the parent chat.
+- Cause: Two compounding issues: 1) The upstream example code line `extensions: { remove: [Subagent] }` was copied verbatim, stripping the tool and making nesting impossible; 2) The child conversation was created without a Role Envelope (`instructions`), leading the LLM to think it was the root orchestrator and panic when a tool was absent; 3) `subagent` synchronously blocked on `await submission.wait()`.
+- Use next time: Subagents must be non-blocking (`background: true`) by default. Never copy toy demo constraints (`remove: [Subagent]`) into production harnesses. Always configure a strict Role Envelope in `instructions` for child conversations so workers know their boundary, solve the task, and return without triggering exploratory spirals.
+- Evidence: `src/runner/subagent.ts`, `tests/subagent-async-envelope.test.ts`, `docs/arch-improvement/ledger.md` (Cycle 89).
+
+
 
 
 

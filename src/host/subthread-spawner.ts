@@ -1,5 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 const execFileAsync = promisify(execFile);
 
@@ -19,8 +22,30 @@ export interface SubthreadSpawnerOptions {
 	execCommand?: (cmd: string, args: string[]) => Promise<string>;
 }
 
+export function resolveProjectIdFromDb(threadId: string): string | undefined {
+	try {
+		const dbPath = join(process.env.HOME || "", ".bb", "bb.db");
+		if (!existsSync(dbPath)) return undefined;
+		const db = new DatabaseSync(dbPath, { open: true, readOnly: true });
+		try {
+			const query = db.prepare("SELECT project_id FROM threads WHERE id = ?");
+			const row = query.get(threadId) as { project_id?: string } | undefined;
+			return row?.project_id;
+		} finally {
+			db.close();
+		}
+	} catch (err) {
+		console.warn(`[SubthreadSpawner] Non-fatal failed to query project_id from db: ${err}`);
+		return undefined;
+	}
+}
+
 export function buildSpawnArgs(args: SubthreadSpawnArgs): string[] {
-	const projectId = args.projectId || process.env.BB_PROJECT_ID || "proj_personal";
+	const projectId =
+		args.projectId ||
+		process.env.BB_PROJECT_ID ||
+		resolveProjectIdFromDb(args.parentThreadId) ||
+		"proj_personal";
 	return [
 		"thread",
 		"spawn",
