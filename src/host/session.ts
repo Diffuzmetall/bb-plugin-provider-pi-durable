@@ -169,6 +169,10 @@ export class PiThreadSession {
 			this.markSubagentCompleted(event.conversationId as string | number);
 		}
 
+		if (isChildEvent && event.type === "agent_end") {
+			return;
+		}
+
 		const parentDeltas = this.translator.translate(event, {
 			threadId: this.options.threadId,
 			cwd: this.options.cwd,

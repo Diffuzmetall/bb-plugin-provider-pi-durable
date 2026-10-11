@@ -25,7 +25,7 @@ test("Subagent delegation item carries task in label and summary", () => {
 	assert.equal(delta.item?.summary, task);
 });
 
-test("BBChildEventAdapter emits initial task prompt message under parentRef", () => {
+test("BBChildEventAdapter does NOT duplicate user task prompt into card stream", () => {
 	const wireEvents: BBWireEvent[] = [];
 	const adapter = new BBChildEventAdapter((ev) => wireEvents.push(ev), "call_sub_1");
 
@@ -40,12 +40,8 @@ test("BBChildEventAdapter emits initial task prompt message under parentRef", ()
 
 	adapter.handleEvent(inputEvent);
 
-	assert.equal(wireEvents.length > 0, true, "Expected wire event for initial subagent input message");
-	const msgEvent = wireEvents[0];
-	assert.equal(msgEvent.type, "message_update");
-	assert.equal(msgEvent.parentRef, "call_sub_1");
-	assert.equal(msgEvent.assistantMessageEvent?.type, "text_delta");
-	assert.match(msgEvent.assistantMessageEvent?.delta ?? "", /Search for authentication bugs/);
+	// User prompt is already rendered in item.open summary and must NOT be re-emitted as an assistant text delta
+	assert.equal(wireEvents.length, 0, "User prompt must not be duplicated into assistant message stream");
 });
 
 test("Child tool execution deltas strictly carry parentRef and parentToolCallId matching delegation callId", () => {

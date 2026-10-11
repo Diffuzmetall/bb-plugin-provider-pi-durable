@@ -56,6 +56,13 @@
 - Use next time: Subagents must be non-blocking (`background: true`) by default. Never copy toy demo constraints (`remove: [Subagent]`) into production harnesses. Always configure a strict Role Envelope in `instructions` for child conversations so workers know their boundary, solve the task, and return without triggering exploratory spirals.
 - Evidence: `src/runner/subagent.ts`, `tests/subagent-async-envelope.test.ts`, `docs/arch-improvement/ledger.md` (Cycle 89).
 
+## 2026-10-12 - Subagent Delegation Card Single-Source-of-Truth & Child Lifecycle Isolation
+- Context: Subagent delegation cards in Beyond Boundaries timeline and end-to-end multi-conversation streaming.
+- Symptom: Task prompt repeated twice in parent timeline (at card opening and inside card message body); child subagents in sidebar threads never received streaming deltas or turn boundary completions.
+- Cause: 1) `BBChildEventAdapter` forwarded the initial child `message_start` as an assistant `text_delta` under `parentRef`, duplicating what `item.open` already displayed in `summary` and `label`; 2) `BBChildEventAdapter` was missing `conversationId` decoration, preventing Host Bridge from resolving `childThreadId`; 3) Child `run_end` was suppressed, leaving child sidebar threads hanging without `turn.boundary: completed`; 4) Unfiltered forwarding of child `agent_end` to parent translator caused premature parent turn completion.
+- Use next time: Keep delegation card summaries clean — never echo user prompts into child text deltas when `summary` already carries the task. Always propagate `conversationId` through child adapters to host bridge. On child `run_end`, emit `agent_end` decorated with `conversationId`, and strictly filter it in `session.ts` so child subthreads complete their turns without prematurely closing the parent turn.
+- Evidence: `src/runner/bridge/bb-child-event-adapter.ts`, `src/host/session.ts:167`, `tests/subagent-timeline-ordering.test.ts`, `tests/subagent-dual-stream.test.ts`, `docs/arch-improvement/ledger.md` (Cycle 90).
+
 
 
 

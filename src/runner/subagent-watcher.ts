@@ -48,7 +48,7 @@ export async function startSubagentWatcher(
 
 		const isChild = parentCallId !== undefined;
 		const childAdapter: BBChildEventAdapter | undefined = isChild
-			? adapter.createChildAdapter(parentCallId)
+			? adapter.createChildAdapter(parentCallId, conversationId)
 			: undefined;
 
 		try {

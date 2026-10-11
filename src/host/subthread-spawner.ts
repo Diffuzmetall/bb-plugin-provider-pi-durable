@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { getBbDataDir } from "./paths.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -11,7 +12,7 @@ export interface SubthreadSpawnArgs {
 	parentThreadId: string;
 	title: string;
 	task: string;
-	conversationId: string;
+	conversationId?: string;
 }
 
 export interface ThreadRegistrationTarget {
@@ -24,7 +25,7 @@ export interface SubthreadSpawnerOptions {
 
 export function resolveProjectIdFromDb(threadId: string): string | undefined {
 	try {
-		const dbPath = join(process.env.HOME || "", ".bb", "bb.db");
+		const dbPath = join(getBbDataDir(), "bb.db");
 		if (!existsSync(dbPath)) return undefined;
 		const db = new DatabaseSync(dbPath, { open: true, readOnly: true });
 		try {

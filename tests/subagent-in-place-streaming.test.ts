@@ -77,11 +77,16 @@ describe("Native Subagent In-Place Streaming (Cycle 80)", () => {
 			assert.equal(toolEndEvt.isError, false);
 		}
 
-		// 5. Lifecycle events should be suppressed (no parent turn pollution)
+		// 5. Lifecycle events: turn_start and turn_end are suppressed so parent turn isn't broken
 		childAdapter.handleEvent({ type: "turn_start" } as AgentEvent);
 		childAdapter.handleEvent({ type: "turn_end" } as AgentEvent);
+		assert.equal(emitted.length, 5); // turn events remain suppressed
+
+		// 6. Child run_end emits agent_end scoped to subagent conversation
 		childAdapter.handleEvent({ type: "run_end" } as AgentEvent);
-		assert.equal(emitted.length, 5); // Count remains 5
+		assert.equal(emitted.length, 6);
+		assert.equal(emitted[5].type, "agent_end");
+		assert.equal(emitted[5].parentRef, "parent-call-123");
 	});
 
 	it("DeltaTranslator emits BB schema-valid thread deltas for child tool and reasoning events", () => {

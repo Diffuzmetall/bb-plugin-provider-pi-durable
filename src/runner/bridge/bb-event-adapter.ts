@@ -46,8 +46,8 @@ export class BBEventAdapter {
 		this.output({ type: "message_update", assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: this.currentThinking } });
 	}
 
-	public createChildAdapter(parentCallId: string): BBChildEventAdapter {
-		return new BBChildEventAdapter(this.output, parentCallId);
+	public createChildAdapter(parentCallId: string, conversationId?: string | number): BBChildEventAdapter {
+		return new BBChildEventAdapter(this.output, parentCallId, conversationId);
 	}
 
 	private emitTerminal(type: "turn_end" | "agent_end", current: DurableView): void {

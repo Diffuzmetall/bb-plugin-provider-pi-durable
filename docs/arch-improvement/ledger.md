@@ -390,3 +390,50 @@
 
 
 
+
+
+---
+
+## Cycle 90: Subagent Prompt Deduplication, End-to-End Conversation Routing & Child Lifecycle Isolation
+
+**Goal:** Устранить дублирование промпта сабагента в родительской карточке делегации, восстановить сквозной проброс `conversationId` от дочернего адаптера событий до хоста, обеспечить корректное завершение ходов в дочерних тредах BB без разрыва родительского хода, устранить `as any` и задействовать канонические пути данных BB.
+
+### 1. Triaged Findings & Dispositions
+
+| ID | Issue / Component | Severity | Rule | Disposition | Root Cause & Resolution |
+|---|---|---|---|---|---|
+| **F-90-1** | Дублирование промпта сабагента в родительской карточке делегации | **P1** | AP-026 | `fix-now` | В `bb-child-event-adapter.ts` входящее событие `message_start` пользователя транслировалось как `text_delta` под `parentRef`. При этом заголовок карточки уже содержал задачу в `summary` и `label`. В результате задача выводилась дважды (в шапке карточки и внутри её тела). Удален повторный эмит `message_start`; карточка делегации теперь отображает только реальный прогресс ребенка. |
+| **F-90-2** | Некаскадируемый аборт фоновых сабагентов при остановке родителя | **P2** | AP-010, AP-034 | `log-only` | По архитектурному контракту `@earendil-works/pi-durable` задачи с `{ background: true }` являются изолированной границей и выживают при аборте родителя. Зафиксировано и сохранено в соответствии с решением пользователя («Пусть не стопаются как завещал пи»). |
+| **F-90-3** | Остановка родителя не шлет прерывание в активные сабтреды BB | **P2** | AP-020, AP-034 | `log-only` | Аналогично F-90-2, сабтреды в BB продолжают работу автономно. |
+| **F-90-4** | Разрыв `conversationId` между Runner и Host (отсутствие стриминга и завершения в сабтредах BB) | **P1** | AP-026, AP-034 | `fix-now` | `BBChildEventAdapter` создавался без `conversationId` и не проставлял его на событиях. Добавлен `conversationId` в конструктор адаптера и контракт `BBWireEvent`. Добавлена генерация `agent_end` при `run_end` ребенка, а в `session.ts` установлен фильтр, предотвращающий завершение хода родителя при получении дочернего `agent_end`. |
+| **F-90-5** | Жестко закодированный путь к `bb.db` в `subthread-spawner.ts` | **P2** | AP-020 | `fix-now` | В `resolveProjectIdFromDb` использовался `join(process.env.HOME || "", ".bb", "bb.db")` вместо канонического `getBbDataDir()` из `./paths.ts`. Заменено на канонический импорт. |
+| **F-90-6** | Нарушение AP-029 (`(session as any)` в `src/host/bridge-router.ts`) | **P2** | AP-029 | `fix-now` | Вызовы `findSubagentConversationForTask` и `consumeCompletedMirror` кастовались к `any`. Касты устранены благодаря прямой типизации методов на `PiThreadSession`. |
+| **F-90-7** | Необязательность `conversationId` в `SubthreadSpawnArgs` | **P3** | AP-026 | `fix-now` | Поле `conversationId` в интерфейсе сделано опциональным (`conversationId?: string`). |
+
+### 2. Architecture Implementations
+- **`src/runner/bridge/bb-child-event-adapter.ts` (135 строк, AP-019 < 200):**
+  - Ликвидирован эмит входящего `message_start` пользователя, предотвратив повторный вывод задачи внутри карточки делегации.
+  - Поддержка `conversationId` на всех дочерних событиях (`message_update`, `tool_execution_*`).
+  - Генерация события `agent_end` при `run_end` с сохранением `parentRef` и `conversationId`.
+- **`src/runner/bridge/contracts.ts` (170 строк, AP-019 < 200):**
+  - Добавлено свойство `conversationId?: string | number` во все дочерние wire events.
+- **`src/runner/subagent-watcher.ts` (100 строк, AP-019 < 200):**
+  - Проброс `conversationId` при создании `childAdapter` через `adapter.createChildAdapter(parentCallId, conversationId)`.
+- **`src/host/session.ts` (239 строк, AP-019 < 250):**
+  - Изоляция жизненного цикла: при получении дочернего `agent_end` дочерний тред получает `turn.boundary: completed`, а родительский транслятор защищен от ложного досрочного закрытия родительского хода.
+- **`src/host/bridge-router.ts` (207 строк, AP-019 < 250):**
+  - Устранены приведения `as any` для Mirror Guard и поиска сабагентов.
+- **`src/host/subthread-spawner.ts` (98 строк, AP-019 < 250):**
+  - Использование канонического `getBbDataDir()` из `./paths.ts`.
+
+### 3. Verification Evidence
+- `npx tsc --noEmit`: **0 errors (exit code 0)**.
+- `npm test`: **203 / 203 passing assertions across 12 test suites (0 failures, 0 skips)**.
+  - `tests/subagent-timeline-ordering.test.ts` (3/3 pass: подтверждено отсутствие дублирования задачи в карточке).
+  - `tests/subagent-dual-stream.test.ts` (3/3 pass: подтверждена изоляция родительского хода при дочернем `agent_end` и декорация `conversationId`).
+  - `tests/subagent-in-place-streaming.test.ts` (2/2 pass).
+- `npm run build`: Сборка успешна (`dist/runner/index.js`, `dist/server.js`, `dist/host.js`).
+- `npm run doctor`: **7 System Tools, 6 Extension Tools, 8 Loaded Extensions**.
+- Строгое соблюдение AP-019: **100% файлов в `src/runner/` < 200 строк, 100% файлов в `src/host/` < 250 строк**.
+- Артефакты синхронизированы в кеш BB (`~/.bb/plugins/cache/.../dist/`).
+- `bb plugin reload provider-pi-durable`: Перезагрузка успешна, статус `running`.

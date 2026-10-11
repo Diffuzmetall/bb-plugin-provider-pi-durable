@@ -1633,12 +1633,14 @@ function buildToolExecutionEnd(event, parentRef) {
 var BBChildEventAdapter = class {
   output;
   parentRef;
+  conversationId;
   currentText = "";
   currentThinking = "";
   isInThinking = false;
-  constructor(output2, parentRef) {
+  constructor(output2, parentRef, conversationId) {
     this.output = output2;
     this.parentRef = parentRef;
+    this.conversationId = conversationId;
   }
   closeThinkingIfNeeded() {
     if (!this.isInThinking) return;
@@ -1646,7 +1648,8 @@ var BBChildEventAdapter = class {
     this.output({
       type: "message_update",
       assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: this.currentThinking },
-      parentRef: this.parentRef
+      parentRef: this.parentRef,
+      ...this.conversationId !== void 0 ? { conversationId: this.conversationId } : {}
     });
   }
   handleEvent(event, _current) {
@@ -1659,7 +1662,8 @@ var BBChildEventAdapter = class {
             this.output({
               type: "message_update",
               assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: change.delta },
-              parentRef: this.parentRef
+              parentRef: this.parentRef,
+              ...this.conversationId !== void 0 ? { conversationId: this.conversationId } : {}
             });
           } else if (change.type === "text_delta") {
             this.closeThinkingIfNeeded();
@@ -1667,7 +1671,8 @@ var BBChildEventAdapter = class {
             this.output({
               type: "message_update",
               assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: change.delta },
-              parentRef: this.parentRef
+              parentRef: this.parentRef,
+              ...this.conversationId !== void 0 ? { conversationId: this.conversationId } : {}
             });
           }
         }
@@ -1680,7 +1685,8 @@ var BBChildEventAdapter = class {
           toolCallId: `${this.parentRef}:${event.toolCallId}`,
           toolName: event.toolName,
           args: event.args ?? {},
-          parentRef: this.parentRef
+          parentRef: this.parentRef,
+          ...this.conversationId !== void 0 ? { conversationId: this.conversationId } : {}
         });
         break;
       }
@@ -1689,41 +1695,44 @@ var BBChildEventAdapter = class {
           { ...event, toolCallId: `${this.parentRef}:${event.toolCallId}` },
           this.parentRef
         );
-        if (update) this.output(update);
-        break;
-      }
-      case "message_start": {
-        if (event.message?.role === "user") {
-          const content = event.message.content;
-          const text = Array.isArray(content) ? content.filter((c) => typeof c === "object" && c !== null && c.type === "text").map((c) => c.text).join("") : typeof content === "string" ? content : "";
-          if (text.trim()) {
-            this.output({
-              type: "message_update",
-              assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: text },
-              parentRef: this.parentRef
-            });
-          }
+        if (update) {
+          this.output({
+            ...update,
+            ...this.conversationId !== void 0 ? { conversationId: this.conversationId } : {}
+          });
         }
         break;
       }
       case "tool_execution_end": {
-        this.output(
-          buildToolExecutionEnd(
-            { ...event, toolCallId: `${this.parentRef}:${event.toolCallId}` },
-            this.parentRef
-          )
+        const end = buildToolExecutionEnd(
+          { ...event, toolCallId: `${this.parentRef}:${event.toolCallId}` },
+          this.parentRef
         );
+        this.output({
+          ...end,
+          ...this.conversationId !== void 0 ? { conversationId: this.conversationId } : {}
+        });
         break;
       }
       case "message_end": {
         this.closeThinkingIfNeeded();
         break;
       }
+      case "run_end": {
+        this.closeThinkingIfNeeded();
+        this.output({
+          type: "agent_end",
+          messages: [],
+          parentRef: this.parentRef,
+          ...this.conversationId !== void 0 ? { conversationId: this.conversationId } : {}
+        });
+        break;
+      }
       // Subagent lifecycle events are scoped to the child task and must not break parent turn
+      case "message_start":
       case "run_start":
       case "turn_start":
       case "turn_end":
-      case "run_end":
       case "snapshot":
       case "compaction_start":
       case "compaction_end":
@@ -1753,8 +1762,8 @@ var BBEventAdapter = class {
     this.isInThinking = false;
     this.output({ type: "message_update", assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: this.currentThinking } });
   }
-  createChildAdapter(parentCallId) {
-    return new BBChildEventAdapter(this.output, parentCallId);
+  createChildAdapter(parentCallId, conversationId) {
+    return new BBChildEventAdapter(this.output, parentCallId, conversationId);
   }
   emitTerminal(type, current) {
     this.closeThinkingIfNeeded();
@@ -2177,7 +2186,7 @@ async function startSubagentWatcher(harness, adapter, getCurrentView) {
     if (attached.has(conversationId)) return;
     attached.add(conversationId);
     const isChild = parentCallId !== void 0;
-    const childAdapter = isChild ? adapter.createChildAdapter(parentCallId) : void 0;
+    const childAdapter = isChild ? adapter.createChildAdapter(parentCallId, conversationId) : void 0;
     try {
       const stream = await watchEvents(harness, conversationId, BACKGROUND_CONTEXT3);
       activeStreams.set(conversationId, stream);

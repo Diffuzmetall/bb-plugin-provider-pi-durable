@@ -14,13 +14,15 @@ import {
 export class BBChildEventAdapter {
 	private readonly output: (event: BBWireEvent) => void;
 	private readonly parentRef: string;
+	private readonly conversationId?: string | number;
 	private currentText = "";
 	private currentThinking = "";
 	private isInThinking = false;
 
-	constructor(output: (event: BBWireEvent) => void, parentRef: string) {
+	constructor(output: (event: BBWireEvent) => void, parentRef: string, conversationId?: string | number) {
 		this.output = output;
 		this.parentRef = parentRef;
+		this.conversationId = conversationId;
 	}
 
 	private closeThinkingIfNeeded(): void {
@@ -30,6 +32,7 @@ export class BBChildEventAdapter {
 			type: "message_update",
 			assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: this.currentThinking },
 			parentRef: this.parentRef,
+			...(this.conversationId !== undefined ? { conversationId: this.conversationId } : {}),
 		});
 	}
 
@@ -44,6 +47,7 @@ export class BBChildEventAdapter {
 							type: "message_update",
 							assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: change.delta },
 							parentRef: this.parentRef,
+							...(this.conversationId !== undefined ? { conversationId: this.conversationId } : {}),
 						});
 					} else if (change.type === "text_delta") {
 						this.closeThinkingIfNeeded();
@@ -52,6 +56,7 @@ export class BBChildEventAdapter {
 							type: "message_update",
 							assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: change.delta },
 							parentRef: this.parentRef,
+							...(this.conversationId !== undefined ? { conversationId: this.conversationId } : {}),
 						});
 					}
 				}
@@ -66,6 +71,7 @@ export class BBChildEventAdapter {
 					toolName: event.toolName,
 					args: event.args ?? {},
 					parentRef: this.parentRef,
+					...(this.conversationId !== undefined ? { conversationId: this.conversationId } : {}),
 				});
 				break;
 			}
@@ -75,37 +81,24 @@ export class BBChildEventAdapter {
 					{ ...event, toolCallId: `${this.parentRef}:${event.toolCallId}` },
 					this.parentRef,
 				);
-				if (update) this.output(update);
-				break;
-			}
-
-			case "message_start": {
-				if (event.message?.role === "user") {
-					const content = event.message.content;
-					const text = Array.isArray(content)
-						? content
-								.filter((c: unknown): c is { type: "text"; text: string } => typeof c === "object" && c !== null && (c as { type: string }).type === "text")
-								.map((c) => c.text)
-								.join("")
-						: (typeof content === "string" ? content : "");
-					if (text.trim()) {
-						this.output({
-							type: "message_update",
-							assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: text },
-							parentRef: this.parentRef,
-						});
-					}
+				if (update) {
+					this.output({
+						...update,
+						...(this.conversationId !== undefined ? { conversationId: this.conversationId } : {}),
+					});
 				}
 				break;
 			}
 
 			case "tool_execution_end": {
-				this.output(
-					buildToolExecutionEnd(
-						{ ...event, toolCallId: `${this.parentRef}:${event.toolCallId}` },
-						this.parentRef,
-					),
+				const end = buildToolExecutionEnd(
+					{ ...event, toolCallId: `${this.parentRef}:${event.toolCallId}` },
+					this.parentRef,
 				);
+				this.output({
+					...end,
+					...(this.conversationId !== undefined ? { conversationId: this.conversationId } : {}),
+				});
 				break;
 			}
 
@@ -114,11 +107,22 @@ export class BBChildEventAdapter {
 				break;
 			}
 
+			case "run_end": {
+				this.closeThinkingIfNeeded();
+				this.output({
+					type: "agent_end",
+					messages: [],
+					parentRef: this.parentRef,
+					...(this.conversationId !== undefined ? { conversationId: this.conversationId } : {}),
+				});
+				break;
+			}
+
 			// Subagent lifecycle events are scoped to the child task and must not break parent turn
+			case "message_start":
 			case "run_start":
 			case "turn_start":
 			case "turn_end":
-			case "run_end":
 			case "snapshot":
 			case "compaction_start":
 			case "compaction_end":

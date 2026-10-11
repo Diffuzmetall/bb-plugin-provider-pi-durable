@@ -85,9 +85,47 @@ test("PiThreadSession completes child thread when subagent finishes", async () =
 		);
 		assert.ok(hasBoundary, "Child thread must receive turn.boundary upon agent_end");
 
+		// Parent thread must NOT receive turn.boundary upon child agent_end
+		const parentNotifs = notifications.filter((n) => n.params.threadId === "thr_parent");
+		const parentHasBoundary = parentNotifs.some(
+			(n) => Array.isArray(n.params.deltas) && (n.params.deltas as any[]).some((d) => d.kind === "turn.boundary"),
+		);
+		assert.equal(parentHasBoundary, false, "Parent thread must not complete turn when child agent_end arrives");
+
 		// Subagent state must transition to completed
 		assert.equal(session.getSubagentState("2")?.status, "completed");
 	} finally {
 		session.kill();
 	}
+});
+
+test("BBChildEventAdapter decorates all events with conversationId and emits agent_end on run_end", async () => {
+	const { BBChildEventAdapter } = await import("../src/runner/bridge/bb-child-event-adapter.ts");
+	const wireEvents: any[] = [];
+	const adapter = new BBChildEventAdapter((ev) => wireEvents.push(ev), "call_sub_1", 42);
+
+	adapter.handleEvent({
+		type: "message_update",
+		changes: [{ type: "text_delta", delta: "Working..." }],
+	} as any);
+
+	adapter.handleEvent({
+		type: "tool_execution_start",
+		toolCallId: "call_bash_1",
+		toolName: "bash",
+		args: { command: "ls" },
+	} as any);
+
+	adapter.handleEvent({
+		type: "run_end",
+	} as any);
+
+	assert.equal(wireEvents.length, 3);
+	assert.equal(wireEvents[0].conversationId, 42);
+	assert.equal(wireEvents[0].parentRef, "call_sub_1");
+	assert.equal(wireEvents[1].conversationId, 42);
+	assert.equal(wireEvents[1].parentRef, "call_sub_1");
+	assert.equal(wireEvents[2].type, "agent_end");
+	assert.equal(wireEvents[2].conversationId, 42);
+	assert.equal(wireEvents[2].parentRef, "call_sub_1");
 });

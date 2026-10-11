@@ -86,8 +86,8 @@ export async function handleTurnStart(
 
 	const { conversationId } = parseProviderThreadId(providerThreadId);
 	let targetConversationId = conversationId;
-	if (!targetConversationId && typeof (session as any).findSubagentConversationForTask === "function") {
-		targetConversationId = (session as any).findSubagentConversationForTask(text);
+	if (!targetConversationId && typeof session.findSubagentConversationForTask === "function") {
+		targetConversationId = session.findSubagentConversationForTask(text);
 	}
 	const mirrorState = targetConversationId && typeof session.getSubagentState === "function"
 		? session.getSubagentState(targetConversationId)
@@ -111,8 +111,8 @@ export async function handleTurnStart(
 		if (typeof session.registerThread === "function") {
 			session.registerThread(params.threadId, targetConversationId);
 		}
-		if (typeof (session as any).consumeCompletedMirror === "function" && targetConversationId) {
-			(session as any).consumeCompletedMirror(targetConversationId);
+		if (typeof session.consumeCompletedMirror === "function" && targetConversationId) {
+			session.consumeCompletedMirror(targetConversationId);
 		}
 		if (params.clientRequestId && CREQ_REGEX.test(params.clientRequestId)) {
 			ctx.sendNotification("thread/delta", {

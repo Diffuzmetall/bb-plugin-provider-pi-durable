@@ -9,6 +9,7 @@ export interface BBToolExecutionStartEvent {
 	toolName: string;
 	args: Record<string, unknown>;
 	parentRef?: string;
+	conversationId?: string | number;
 }
 
 export interface BBToolExecutionUpdateEvent {
@@ -19,6 +20,7 @@ export interface BBToolExecutionUpdateEvent {
 	trimStart?: number;
 	details?: unknown;
 	parentRef?: string;
+	conversationId?: string | number;
 }
 
 export interface BBToolExecutionEndEvent {
@@ -29,24 +31,28 @@ export interface BBToolExecutionEndEvent {
 	isError: boolean;
 	details?: unknown;
 	parentRef?: string;
+	conversationId?: string | number;
 }
 
 export interface BBThinkingDeltaEvent {
 	type: "message_update";
 	assistantMessageEvent: { type: "thinking_delta"; contentIndex: 0; delta: string };
 	parentRef?: string;
+	conversationId?: string | number;
 }
 
 export interface BBThinkingEndEvent {
 	type: "message_update";
 	assistantMessageEvent: { type: "thinking_end"; contentIndex: 0; content: string };
 	parentRef?: string;
+	conversationId?: string | number;
 }
 
 export interface BBTextDeltaEvent {
 	type: "message_update";
 	assistantMessageEvent: { type: "text_delta"; contentIndex: number; delta: string };
 	parentRef?: string;
+	conversationId?: string | number;
 }
 
 export type BBMessageUpdateEvent = BBThinkingDeltaEvent | BBThinkingEndEvent | BBTextDeltaEvent;
@@ -102,6 +108,7 @@ export interface BBMessageEndEvent {
 	type: "message_end";
 	message: BBAssistantMessage;
 	parentRef?: string;
+	conversationId?: string | number;
 }
 
 export interface BBAgentEndEvent {
@@ -112,6 +119,8 @@ export interface BBAgentEndEvent {
 	cumulativeUsage?: CumulativeUsageMetrics;
 	aborted?: boolean;
 	stopReason?: string;
+	parentRef?: string;
+	conversationId?: string | number;
 }
 
 export interface BBCompactionStartEvent {
