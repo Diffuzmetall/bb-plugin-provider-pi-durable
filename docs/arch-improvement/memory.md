@@ -63,6 +63,13 @@
 - Use next time: Keep delegation card summaries clean — never echo user prompts into child text deltas when `summary` already carries the task. Always propagate `conversationId` through child adapters to host bridge. On child `run_end`, emit `agent_end` decorated with `conversationId`, and strictly filter it in `session.ts` so child subthreads complete their turns without prematurely closing the parent turn.
 - Evidence: `src/runner/bridge/bb-child-event-adapter.ts`, `src/host/session.ts:167`, `tests/subagent-timeline-ordering.test.ts`, `tests/subagent-dual-stream.test.ts`, `docs/arch-improvement/ledger.md` (Cycle 90).
 
+## 2026-10-12 - Rejection of Declarative Graph DSL: Atomic Primitive Invariant (YAGNI & Unix Philosophy)
+- Context: Proposal to add `tasks: string[]` and `chain: string[]` directly into the `subagent` tool schema.
+- Symptom: Risk of creating a proprietary, bloated mini-framework/DSL inside the provider harness for task graph execution.
+- Cause: Overengineering provider boundaries. LLMs and human orchestrators already possess native multi-tool parallel calls (`tool_calls` fan-out) and sequential nested calls for pipelines.
+- Use next time: Keep provider tools atomic (`subagent({ task, background })`). Do not invent custom graph DSLs with string interpolation (`{previous}`) inside the tool runner. The provider's sole responsibility is robust lifecycle, SQLite persistence, and UI streaming; composition belongs to the agent.
+- Evidence: `docs/superpowers/specs/2026-10-12-prd-pi-durable-native-subagents-and-composite-threads.md` (Section 6), `docs/arch-improvement/ledger.md` (ADR-90-1).
+
 
 
 
