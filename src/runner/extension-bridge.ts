@@ -32,20 +32,50 @@ export interface SetupExtensionRunnerOptions {
 	settingsManager?: SettingsManager;
 }
 
+export function createExtensionUIContext(
+	onNotice?: (type: "info" | "warning" | "error", message: string) => void,
+): ExtensionUIContext {
+	return {
+		select: async () => undefined,
+		confirm: async () => false,
+		input: async () => undefined,
+		notify: (message: string, type: "info" | "warning" | "error" = "info") => {
+			onNotice?.(type, message);
+		},
+		onTerminalInput: () => () => {},
+		setStatus: () => {},
+		setWorkingMessage: () => {},
+		setWorkingVisible: () => {},
+		setWorkingIndicator: () => {},
+		setHiddenThinkingLabel: () => {},
+		setWidget: () => {},
+		setFooter: () => {},
+		setHeader: () => {},
+		setTitle: () => {},
+		custom: async () => undefined as any,
+		pasteToEditor: () => {},
+		setEditorText: () => {},
+		getEditorText: () => "",
+		editor: async () => undefined,
+		addAutocompleteProvider: () => {},
+		setEditorComponent: () => {},
+		getEditorComponent: () => undefined,
+		theme: {} as any,
+		getAllThemes: () => [],
+		getTheme: () => undefined,
+		setTheme: () => ({ success: true }),
+		getToolsExpanded: () => false,
+		setToolsExpanded: () => {},
+	};
+}
+
 /** Initializes ExtensionRunner and binds actions and nested tool execution. */
 export async function setupExtensionRunner(options: SetupExtensionRunnerOptions): Promise<ExtensionRunner> {
 	const sessionManager = SessionManager.create(options.cwd);
 	const modelRegistry = new ModelRegistry(options.modelRuntime);
 	const runner = new ExtensionRunner(options.extensions, options.runtime, options.cwd, sessionManager, modelRegistry);
 
-	if (options.onNotice) {
-		const notifyFn = options.onNotice;
-		runner.setUIContext({
-			notify: (message: string, type: "info" | "warning" | "error" = "info") => {
-				notifyFn(type, message);
-			},
-		} as unknown as ExtensionUIContext);
-	}
+	runner.setUIContext(createExtensionUIContext(options.onNotice));
 
 	let activeToolNames: string[] = options.getCallableTools ? options.getCallableTools().map((t) => t.name) : [];
 	let sessionName: string | undefined;

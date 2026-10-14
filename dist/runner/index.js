@@ -962,18 +962,60 @@ function installExtensionTools(registry, tools) {
 }
 
 // src/runner/extension-bridge.ts
+function createExtensionUIContext(onNotice) {
+  return {
+    select: async () => void 0,
+    confirm: async () => false,
+    input: async () => void 0,
+    notify: (message, type = "info") => {
+      onNotice?.(type, message);
+    },
+    onTerminalInput: () => () => {
+    },
+    setStatus: () => {
+    },
+    setWorkingMessage: () => {
+    },
+    setWorkingVisible: () => {
+    },
+    setWorkingIndicator: () => {
+    },
+    setHiddenThinkingLabel: () => {
+    },
+    setWidget: () => {
+    },
+    setFooter: () => {
+    },
+    setHeader: () => {
+    },
+    setTitle: () => {
+    },
+    custom: async () => void 0,
+    pasteToEditor: () => {
+    },
+    setEditorText: () => {
+    },
+    getEditorText: () => "",
+    editor: async () => void 0,
+    addAutocompleteProvider: () => {
+    },
+    setEditorComponent: () => {
+    },
+    getEditorComponent: () => void 0,
+    theme: {},
+    getAllThemes: () => [],
+    getTheme: () => void 0,
+    setTheme: () => ({ success: true }),
+    getToolsExpanded: () => false,
+    setToolsExpanded: () => {
+    }
+  };
+}
 async function setupExtensionRunner(options) {
   const sessionManager = SessionManager.create(options.cwd);
   const modelRegistry = new ModelRegistry(options.modelRuntime);
   const runner = new ExtensionRunner(options.extensions, options.runtime, options.cwd, sessionManager, modelRegistry);
-  if (options.onNotice) {
-    const notifyFn = options.onNotice;
-    runner.setUIContext({
-      notify: (message, type = "info") => {
-        notifyFn(type, message);
-      }
-    });
-  }
+  runner.setUIContext(createExtensionUIContext(options.onNotice));
   let activeToolNames = options.getCallableTools ? options.getCallableTools().map((t) => t.name) : [];
   let sessionName;
   const actions = {

@@ -59,7 +59,7 @@ export function resolvePluginVersion(): string {
 	} catch (err) {
 		console.warn(`[InstallationManager] Failed to read package.json version: ${err instanceof Error ? err.message : String(err)}`);
 	}
-	return (cachedPluginVersion = "0.2.29");
+	return (cachedPluginVersion = "0.0.0-unknown");
 }
 
 export function resetPluginVersionCacheForTesting(): void {
@@ -177,7 +177,7 @@ export async function getProviderInstallationRun(
 	const verification =
 		status.latestVersion !== null
 			? { kind: "version_at_least" as const, version: status.latestVersion }
-			: { kind: "version_changed" as const, previousVersion: status.currentVersion ?? "0.2.29" };
+			: { kind: "version_changed" as const, previousVersion: status.currentVersion ?? "0.0.0-unknown" };
 
 	return {
 		available: true,
