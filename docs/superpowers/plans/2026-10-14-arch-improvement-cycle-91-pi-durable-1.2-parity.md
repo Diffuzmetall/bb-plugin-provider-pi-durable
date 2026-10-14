@@ -31,25 +31,22 @@
 **Files:**
 - Modify: `package.json:27-35`
 - Modify: `scripts/build-runner.mjs:20-30`
-- Test: `tests/package-json.test.ts`
+- Modify: `tests/package-integrity.test.ts:55-65`
 
 - [ ] **Step 1: Write the failing test**
 
-In `tests/package-json.test.ts`, add verification that `@earendil-works/pi-codemode` is declared in `dependencies`:
+In `tests/package-integrity.test.ts`, add verification that `@earendil-works/pi-codemode` is declared in `dependencies`:
 
 ```typescript
-test("package.json integrity: @earendil-works/pi-codemode is explicitly in dependencies", () => {
-	const pkg = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8"));
-	assert.ok(pkg.dependencies["@earendil-works/pi-codemode"], "@earendil-works/pi-codemode must be in dependencies");
+	assert.ok(deps.includes("@earendil-works/pi-codemode"), "missing @earendil-works/pi-codemode");
 	assert.strictEqual(pkg.dependencies["@earendil-works/pi-durable"], "^1.2.0");
 	assert.strictEqual(pkg.dependencies["@earendil-works/pi-coding-agent"], "^1.2.0");
-});
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test tests/package-json.test.ts`  
-Expected: FAIL with "@earendil-works/pi-codemode must be in dependencies"
+Run: `node --test tests/package-integrity.test.ts`  
+Expected: FAIL with "missing @earendil-works/pi-codemode"
 
 - [ ] **Step 3: Update `package.json` and `scripts/build-runner.mjs`**
 
@@ -89,13 +86,13 @@ Run: `npm install`
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test tests/package-json.test.ts`  
+Run: `node --test tests/package-integrity.test.ts`  
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add package.json package-lock.json scripts/build-runner.mjs tests/package-json.test.ts
+git add package.json package-lock.json scripts/build-runner.mjs tests/package-integrity.test.ts
 git commit -m "build: upgrade dependencies to pi-durable and pi-coding-agent 1.2.0 and add pi-codemode"
 ```
 
@@ -164,22 +161,22 @@ git commit -m "fix(runner): adapt emitBeforeAgentStart to pi-coding-agent 1.2.0 
 - Modify: `src/runner/subagent.ts:65-92`
 - Modify: `src/runner/tool-adapter.ts:115-155`
 - Modify: `src/runner/bridge/tool-result-extractor.ts:35-50`
-- Test: `tests/subagent.test.ts`
+- Modify: `tests/subagent-async-envelope.test.ts:60-110`
 
-- [ ] **Step 1: Write regression test in `tests/subagent.test.ts`**
+- [ ] **Step 1: Write regression test in `tests/subagent-async-envelope.test.ts`**
 
-Add test asserting that `subagent` execution result contains property `output` and does not rely on dropped `content`:
+Update assertions and add a test verifying that `subagent` execution returns `output` property according to Durable 1.2.0 contract:
 
 ```typescript
 test("Subagent tool execution returns output property according to Durable 1.2.0 contract", async () => {
-	const tool = Subagent.tools?.[0];
+	const tool = Subagent.tools[0];
 	assert.ok(tool, "Subagent tool must exist");
-	// Verify that tool.execute returns an object with output array
-	const mockApi = {
+	const mockApi: any = {
 		taskId: "task_test_subagent_output",
 		commit: async (fn: any) => fn({
 			scanConversations: async () => ({ items: [] }),
-			createConversation: async () => ({ id: 42 }),
+			createConversation: async () => ({ id: "conv_child_output_test" }),
+			doc: async () => ({}),
 			entry: async () => ({ model: [{ content: [{ type: "text", text: "Child solved task" }] }] }),
 		}),
 		details: async () => {},
@@ -189,7 +186,7 @@ test("Subagent tool execution returns output property according to Durable 1.2.0
 			}),
 		}),
 	};
-	const res = await (tool.execute as any)({ task: "Compute 2+2", background: false }, mockApi, {});
+	const res = await tool.execute({ task: "Compute 2+2", background: false }, mockApi, {} as any);
 	assert.ok(Array.isArray(res.output), "Must return output array");
 	assert.strictEqual(res.output[0].text, "Child solved task");
 	assert.strictEqual((res as any).content, undefined, "content property must not be present");
@@ -198,7 +195,7 @@ test("Subagent tool execution returns output property according to Durable 1.2.0
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test tests/subagent.test.ts`  
+Run: `node --test tests/subagent-async-envelope.test.ts`  
 Expected: FAIL with `Must return output array`
 
 - [ ] **Step 3: Update `src/runner/subagent.ts`, `tool-adapter.ts`, and `tool-result-extractor.ts`**
@@ -262,13 +259,13 @@ export function extractToolResult(modelItem: unknown): { result: string; isError
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test tests/subagent.test.ts`  
+Run: `node --test tests/subagent-async-envelope.test.ts`  
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/runner/subagent.ts src/runner/tool-adapter.ts src/runner/bridge/tool-result-extractor.ts tests/subagent.test.ts
+git add src/runner/subagent.ts src/runner/tool-adapter.ts src/runner/bridge/tool-result-extractor.ts tests/subagent-async-envelope.test.ts
 git commit -m "fix(runner): rename ToolExecutionResult content to output for Durable 1.2.0 parity"
 ```
 
