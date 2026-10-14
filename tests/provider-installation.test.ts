@@ -73,14 +73,14 @@ const mockCatalog: ModelCatalog = {
 };
 
 describe("Native Provider Installation Lifecycle (Cycle 76)", () => {
-	it("resolves the dynamic plugin version 0.2.28 without hardcoded fallbacks", () => {
+	it("resolves the dynamic plugin version 0.2.29 without hardcoded fallbacks", () => {
 		const version = resolvePluginVersion();
-		assert.equal(version, "0.2.28");
+		assert.equal(version, "0.2.29");
 	});
 
 	it("correctly compares semver strings", () => {
-		assert.equal(compareSemver("0.2.28", "0.2.0") > 0, true);
-		assert.equal(compareSemver("0.2.28", "0.2.28"), 0);
+		assert.equal(compareSemver("0.2.29", "0.2.0") > 0, true);
+		assert.equal(compareSemver("0.2.29", "0.2.29"), 0);
 		assert.equal(compareSemver("0.1.0", "0.2.0") < 0, true);
 	});
 
@@ -91,7 +91,7 @@ describe("Native Provider Installation Lifecycle (Cycle 76)", () => {
 		assert.equal(parsed.success, true);
 		assert.equal(status.installed, true);
 		assert.equal(status.installSource, "external");
-		assert.equal(status.currentVersion, "0.2.28");
+		assert.equal(status.currentVersion, "0.2.29");
 		assert.equal(status.npmPackageName, "bb-plugin-provider-pi-durable");
 		assert.equal(status.minimumSupportedVersion, "0.2.0");
 		assert.equal(status.needsUpdate, false);
@@ -113,7 +113,7 @@ describe("Native Provider Installation Lifecycle (Cycle 76)", () => {
 			assert.equal(runResult.command.displayCommand, "bb plugin update provider-pi-durable");
 			assert.equal(runResult.verification.kind, "version_changed");
 			if (runResult.verification.kind === "version_changed") {
-				assert.equal(runResult.verification.previousVersion, "0.2.28");
+				assert.equal(runResult.verification.previousVersion, "0.2.29");
 			}
 		}
 	});
@@ -142,7 +142,7 @@ describe("Native Provider Installation Lifecycle (Cycle 76)", () => {
 		resetPluginVersionCacheForTesting();
 		const mockFetch: typeof fetch = async () => new Response(JSON.stringify([{ name: "v0.2.19" }]), { status: 200 });
 		const status = await getProviderInstallationStatus({ checkUpdates: true, fetchFn: mockFetch });
-		assert.equal(status.latestVersion, "0.2.28");
+		assert.equal(status.latestVersion, "0.2.29");
 		assert.equal(status.needsUpdate, false);
 	});
 
@@ -151,7 +151,7 @@ describe("Native Provider Installation Lifecycle (Cycle 76)", () => {
 		resetPluginVersionCacheForTesting();
 		const mockFetch: typeof fetch = async () => { throw new Error("Offline network"); };
 		const status = await getProviderInstallationStatus({ checkUpdates: true, fetchFn: mockFetch });
-		assert.equal(status.latestVersion, "0.2.28");
+		assert.equal(status.latestVersion, "0.2.29");
 		assert.equal(status.needsUpdate, false);
 	});
 });
