@@ -15,7 +15,11 @@ import {
   createRegistry
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { CodingTools } from "@earendil-works/pi-durable/tools";
+import { createCodingTools, CodingTools } from "@earendil-works/pi-durable/tools";
+import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
+import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
+import { CodemodeSandbox } from "@earendil-works/pi-codemode";
+import { createToolSearchExtension } from "@earendil-works/pi-durable/tool-search";
 
 // src/runner/subagent.ts
 import { Type } from "@earendil-works/pi-ai";
@@ -74,7 +78,7 @@ var Subagent = defineExtension({
         const submission = await handle.submit(request, context);
         if (isBackground) {
           return {
-            content: [
+            output: [
               {
                 type: "text",
                 text: `Subagent spawned in background (conversation ${child}). The task is running independently and will report upon completion.`
@@ -88,7 +92,7 @@ var Subagent = defineExtension({
           throw new Error(`Subagent ${child} failed: ${settled.status}`);
         }
         const text = await answerText(api, settled.answer, context);
-        return { content: [{ type: "text", text }], details: { conversationId: child, background: false, task: args2.task } };
+        return { output: [{ type: "text", text }], details: { conversationId: child, background: false, task: args2.task } };
       }
     })
   ]
@@ -302,9 +306,18 @@ function createHarnessSettings(settingsManager, getActiveModel) {
     }
   };
 }
-function createCodingRegistry(settingsManager, cwd, promptOptions) {
+async function createCodingRegistry(settingsManager, cwd, promptOptions) {
   const registry = createRegistry();
-  registry.install(CodingTools);
+  let codingTools = CodingTools;
+  try {
+    const images = await createNodePhotonImages();
+    codingTools = createCodingTools({ images });
+  } catch (err) {
+    console.warn("[HarnessSetup] Photon image processor fallback to basic tools:", err);
+  }
+  registry.install(codingTools);
+  registry.install(createCodemodeExtension({ sandbox: new CodemodeSandbox() }));
+  registry.install(createToolSearchExtension());
   registry.install(Subagent);
   registry.install(createPiPrompt(settingsManager, cwd, promptOptions));
   return registry;
@@ -680,12 +693,15 @@ function createDurableController(ctx) {
     submit: (text, whenBusy) => command(async () => {
       if (ctx.extensionRunner && ctx.dynamicSections) {
         try {
-          const before = await ctx.extensionRunner.emitBeforeAgentStart(text, void 0, {
-            cwd: ctx.cwd ?? process.cwd(),
-            sections: ctx.dynamicSections.getSections()
-          });
-          if (before?.systemPromptOptions?.sections) {
-            ctx.dynamicSections.updateSections(before.systemPromptOptions.sections);
+          const hookRes = await ctx.extensionRunner.emitBeforeAgentStart(
+            { messageType: "user", prompt: text, images: void 0 },
+            {
+              cwd: ctx.cwd ?? process.cwd(),
+              sections: ctx.dynamicSections.getSections()
+            }
+          );
+          if (hookRes?.systemPromptOptions?.sections) {
+            ctx.dynamicSections.updateSections(hookRes.systemPromptOptions.sections);
           }
         } catch (err) {
           ctx.notice(
@@ -775,28 +791,108 @@ import {
 
 // src/runner/tool-adapter.ts
 import {
-  createCodemodeExtension,
+  createCodemodeExtension as createCodemodeExtension2,
   createMcpExtension,
-  createToolSearchExtension
+  createToolSearchExtension as createToolSearchExtension2
 } from "@earendil-works/pi-coding-agent";
 import {
   defineExtension as defineExtension3,
   defineTool as defineTool2
 } from "@earendil-works/pi-durable";
+
+// src/runner/bridge/tool-result-extractor.ts
+var activeToolDetails = /* @__PURE__ */ new Map();
+function extractToolResult(modelItem) {
+  const msg = typeof modelItem === "object" && modelItem !== null ? modelItem : void 0;
+  const isError = msg?.isError ?? false;
+  let result = "";
+  const raw = msg?.output ?? msg?.content;
+  if (Array.isArray(raw)) {
+    result = raw.map((b) => typeof b === "object" && b !== null && typeof b.text === "string" ? b.text : "").filter(Boolean).join("\n");
+  } else if (typeof raw === "string") {
+    result = raw;
+  }
+  return { result, isError };
+}
+function buildToolExecutionUpdate(event, parentRef) {
+  let partialResult = "";
+  if (event.output) {
+    if ("set" in event.output) partialResult = event.output.set;
+    else if ("append" in event.output) partialResult = event.output.append ?? "";
+  }
+  let trimStart;
+  if (event.output && "trimStart" in event.output && typeof event.output.trimStart === "number") {
+    trimStart = event.output.trimStart;
+  }
+  if (event.details !== void 0) {
+    activeToolDetails.set(event.toolCallId, event.details);
+  }
+  if (partialResult || trimStart !== void 0 || event.details !== void 0) {
+    return {
+      type: "tool_execution_update",
+      toolCallId: event.toolCallId,
+      toolName: event.toolName,
+      partialResult,
+      ...trimStart !== void 0 ? { trimStart } : {},
+      ...event.details !== void 0 ? { details: event.details } : {},
+      ...parentRef !== void 0 ? { parentRef } : {}
+    };
+  }
+  return void 0;
+}
+function buildToolExecutionEnd(event, parentRef) {
+  if (event.entry === void 0) {
+    return {
+      type: "tool_execution_end",
+      toolCallId: event.toolCallId,
+      toolName: event.toolName,
+      result: "Tool execution faulted or was orphaned without generating an entry record.",
+      isError: true,
+      ...parentRef !== void 0 ? { parentRef } : {}
+    };
+  }
+  const { result, isError } = extractToolResult(event.entry?.model?.[0]);
+  const entryData = typeof event.entry === "object" && event.entry !== null && "data" in event.entry ? event.entry.data : void 0;
+  const bufferedDetails = activeToolDetails.get(event.toolCallId);
+  activeToolDetails.delete(event.toolCallId);
+  const details = entryData ?? event.details ?? bufferedDetails;
+  return {
+    type: "tool_execution_end",
+    toolCallId: event.toolCallId,
+    toolName: event.toolName,
+    result,
+    isError,
+    ...details !== void 0 ? { details } : {},
+    ...parentRef !== void 0 ? { parentRef } : {}
+  };
+}
+function sanitizeToolResultForAnthropic(blocks, isError) {
+  if (!isError || !Array.isArray(blocks)) return blocks;
+  return blocks.map((block) => {
+    if (block.type === "image") {
+      return { type: "text", text: "[image omitted: error tool results cannot contain images]" };
+    }
+    return block;
+  });
+}
+
+// src/runner/tool-adapter.ts
 function hasOutput(api) {
   return typeof api === "object" && api !== null && "output" in api && typeof api.output === "function";
 }
 function createStandardExtensionFactories() {
-  return [createCodemodeExtension({ mode: "on" }), createToolSearchExtension(), createMcpExtension()];
+  return [createCodemodeExtension2({ mode: "on" }), createToolSearchExtension2(), createMcpExtension()];
 }
 function adaptExtensionTool(toolDef, executeToolFn, createToolContext, getExtensionRunner) {
   const exposure = toolDef.exposure;
+  const isDeferred = exposure === "deferred" || exposure === "codemode-deferred";
   const callers = exposure === "model-only" ? ["model"] : exposure === "codemode" || exposure === "deferred" || exposure === "codemode-deferred" ? ["tools"] : exposure === "hidden" ? [] : ["model", "tools"];
   return defineTool2({
     name: toolDef.name,
     description: toolDef.description,
     parameters: toolDef.parameters,
     ...callers ? { callers } : {},
+    ...isDeferred ? { deferred: true } : {},
     ...toolDef.outputSchema ? {
       outputSchema: toolDef.outputSchema,
       structuredOutputSchema: toolDef.outputSchema
@@ -811,8 +907,10 @@ function adaptExtensionTool(toolDef, executeToolFn, createToolContext, getExtens
           input: args2 ?? {}
         });
         if (hookResult?.block) {
+          const blockContent = [{ type: "text", text: `Tool execution blocked: ${hookResult.reason ?? "policy"}` }];
           return {
-            content: [{ type: "text", text: `Tool execution blocked: ${hookResult.reason ?? "policy"}` }],
+            output: blockContent,
+            content: blockContent,
             isError: true
           };
         }
@@ -845,8 +943,13 @@ function adaptExtensionTool(toolDef, executeToolFn, createToolContext, getExtens
             isError: result.isError ?? false
           });
         }
+        const sanitizedOutput = sanitizeToolResultForAnthropic(
+          result.content,
+          result.isError
+        );
         return {
-          content: result.content,
+          output: sanitizedOutput,
+          content: sanitizedOutput,
           isError: result.isError,
           details: result.details ?? void 0
         };
@@ -865,6 +968,7 @@ function adaptExtensionTool(toolDef, executeToolFn, createToolContext, getExtens
           });
         }
         return {
+          output: errorContent,
           content: errorContent,
           isError: true
         };
@@ -1019,12 +1123,15 @@ function createNestedToolExecutor(registry, getExtensionRunner, getEnv) {
         output: (chunk) => {
           outputText += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
         },
+        retainedOutput: () => ({ text: outputText, truncated: false }),
+        outputWindow: void 0,
         env: getEnv?.(),
         diagnostic: () => {
         }
       };
       const res = await executor(args2, api, runtimeContext);
-      const content = Array.isArray(res?.content) ? res.content : res?.content !== void 0 ? [{ type: "text", text: String(res.content) }] : [{ type: "text", text: outputText }];
+      const rawBlocks = res?.output ?? res?.content;
+      const content = Array.isArray(rawBlocks) ? rawBlocks : rawBlocks !== void 0 ? [{ type: "text", text: String(rawBlocks) }] : [{ type: "text", text: outputText }];
       if (runner?.hasHandlers("tool_result")) {
         await runner.emitToolResult({
           type: "tool_result",
@@ -1101,11 +1208,10 @@ async function mountExtensionBridge(location, modelRuntime, extensionsResult, re
       });
       try {
         const currentTools = registry.snapshot().tools().map((t) => t.tool.name);
-        const beforeStart = await extensionRunner.emitBeforeAgentStart("", void 0, {
-          cwd: location.cwd,
-          selectedTools: currentTools,
-          sections: dynamicSections?.getSections() ?? {}
-        });
+        const beforeStart = await extensionRunner.emitBeforeAgentStart(
+          { messageType: "user", prompt: "", images: void 0 },
+          { cwd: location.cwd, selectedTools: currentTools, sections: dynamicSections?.getSections() ?? {} }
+        );
         if (beforeStart?.systemPromptOptions?.sections && dynamicSections) {
           dynamicSections.updateSections(beforeStart.systemPromptOptions.sections);
         }
@@ -1184,7 +1290,7 @@ async function loadHarnessEnvironment(location, options, envs) {
   };
   const dynamicSections = new DynamicPromptSections();
   const settings = createHarnessSettings(settingsManager, getActiveModel);
-  const registry = createCodingRegistry(settingsManager, location.cwd, {
+  const registry = await createCodingRegistry(settingsManager, location.cwd, {
     ...options.prompt,
     resourceLoader,
     dynamicSections
@@ -1563,72 +1669,6 @@ function resolveTurnSummary(current, currentText, currentThinking, lastAssistant
   return { finalMsg, cw, cumulativeUsage, isAborted, lastCheckpointId };
 }
 
-// src/runner/bridge/tool-result-extractor.ts
-var activeToolDetails = /* @__PURE__ */ new Map();
-function extractToolResult(modelItem) {
-  const msg = typeof modelItem === "object" && modelItem !== null ? modelItem : void 0;
-  const isError = msg?.isError ?? false;
-  let result = "";
-  if (Array.isArray(msg?.content)) {
-    result = msg.content.map((b) => typeof b === "object" && b !== null && typeof b.text === "string" ? b.text : "").filter(Boolean).join("\n");
-  } else if (typeof msg?.content === "string") {
-    result = msg.content;
-  }
-  return { result, isError };
-}
-function buildToolExecutionUpdate(event, parentRef) {
-  let partialResult = "";
-  if (event.output) {
-    if ("set" in event.output) partialResult = event.output.set;
-    else if ("append" in event.output) partialResult = event.output.append ?? "";
-  }
-  let trimStart;
-  if (event.output && "trimStart" in event.output && typeof event.output.trimStart === "number") {
-    trimStart = event.output.trimStart;
-  }
-  if (event.details !== void 0) {
-    activeToolDetails.set(event.toolCallId, event.details);
-  }
-  if (partialResult || trimStart !== void 0 || event.details !== void 0) {
-    return {
-      type: "tool_execution_update",
-      toolCallId: event.toolCallId,
-      toolName: event.toolName,
-      partialResult,
-      ...trimStart !== void 0 ? { trimStart } : {},
-      ...event.details !== void 0 ? { details: event.details } : {},
-      ...parentRef !== void 0 ? { parentRef } : {}
-    };
-  }
-  return void 0;
-}
-function buildToolExecutionEnd(event, parentRef) {
-  if (event.entry === void 0) {
-    return {
-      type: "tool_execution_end",
-      toolCallId: event.toolCallId,
-      toolName: event.toolName,
-      result: "Tool execution faulted or was orphaned without generating an entry record.",
-      isError: true,
-      ...parentRef !== void 0 ? { parentRef } : {}
-    };
-  }
-  const { result, isError } = extractToolResult(event.entry?.model?.[0]);
-  const entryData = typeof event.entry === "object" && event.entry !== null && "data" in event.entry ? event.entry.data : void 0;
-  const bufferedDetails = activeToolDetails.get(event.toolCallId);
-  activeToolDetails.delete(event.toolCallId);
-  const details = entryData ?? event.details ?? bufferedDetails;
-  return {
-    type: "tool_execution_end",
-    toolCallId: event.toolCallId,
-    toolName: event.toolName,
-    result,
-    isError,
-    ...details !== void 0 ? { details } : {},
-    ...parentRef !== void 0 ? { parentRef } : {}
-  };
-}
-
 // src/runner/bridge/bb-child-event-adapter.ts
 var BBChildEventAdapter = class {
   output;
@@ -1838,17 +1878,18 @@ var BBEventAdapter = class {
           type: "tool_execution_start",
           toolCallId: event.toolCallId,
           toolName: event.toolName,
-          args: event.args ?? {}
+          args: event.args ?? {},
+          ...event.parentToolCallId !== void 0 ? { parentRef: event.parentToolCallId } : {}
         });
         break;
       }
       case "tool_execution_update": {
-        const update = buildToolExecutionUpdate(event);
+        const update = buildToolExecutionUpdate(event, event.parentToolCallId);
         if (update) this.output(update);
         break;
       }
       case "tool_execution_end": {
-        this.output(buildToolExecutionEnd(event));
+        this.output(buildToolExecutionEnd(event, event.parentToolCallId));
         break;
       }
       case "message_end": {

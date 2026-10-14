@@ -90,7 +90,7 @@ export async function loadHarnessEnvironment(
 
 	const dynamicSections = new DynamicPromptSections();
 	const settings = createHarnessSettings(settingsManager, getActiveModel);
-	const registry = createCodingRegistry(settingsManager, location.cwd, {
+	const registry = await createCodingRegistry(settingsManager, location.cwd, {
 		...options.prompt,
 		resourceLoader,
 		dynamicSections,

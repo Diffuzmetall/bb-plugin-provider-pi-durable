@@ -51,6 +51,7 @@ export function adaptExtensionTool(
 	getExtensionRunner?: () => ExtensionRunner | undefined,
 ): ToolRegistration {
 	const exposure = toolDef.exposure as string | undefined;
+	const isDeferred = exposure === "deferred" || exposure === "codemode-deferred";
 	const callers =
 		exposure === "model-only"
 			? (["model"] as const)
@@ -65,6 +66,7 @@ export function adaptExtensionTool(
 		description: toolDef.description,
 		parameters: toolDef.parameters,
 		...(callers ? { callers } : {}),
+		...(isDeferred ? { deferred: true } : {}),
 		...(toolDef.outputSchema
 			? {
 					outputSchema: toolDef.outputSchema as import("typebox").TSchema,
@@ -81,8 +83,10 @@ export function adaptExtensionTool(
 					input: (args ?? {}) as Record<string, unknown>,
 				});
 				if (hookResult?.block) {
+					const blockContent = [{ type: "text" as const, text: `Tool execution blocked: ${hookResult.reason ?? "policy"}` }];
 					return {
-						output: [{ type: "text", text: `Tool execution blocked: ${hookResult.reason ?? "policy"}` }],
+						output: blockContent,
+						content: blockContent,
 						isError: true,
 					};
 				}
@@ -125,9 +129,13 @@ export function adaptExtensionTool(
 					});
 				}
 
-				const sanitizedOutput = sanitizeToolResultForAnthropic(result.content as Array<{ type: string }>, result.isError);
+				const sanitizedOutput = sanitizeToolResultForAnthropic(
+					result.content as Array<import("@earendil-works/pi-ai").TextContent | import("@earendil-works/pi-ai").ImageContent>,
+					result.isError,
+				);
 				return {
 					output: sanitizedOutput,
+					content: sanitizedOutput,
 					isError: result.isError,
 					details: (result.details ?? undefined) as JsonValue | undefined,
 				};
@@ -147,6 +155,7 @@ export function adaptExtensionTool(
 				}
 				return {
 					output: errorContent,
+					content: errorContent,
 					isError: true,
 				};
 			}

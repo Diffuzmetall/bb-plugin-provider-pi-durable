@@ -9,7 +9,11 @@ import {
 	type Registry,
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { CodingTools } from "@earendil-works/pi-durable/tools";
+import { createCodingTools, CodingTools } from "@earendil-works/pi-durable/tools";
+import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
+import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
+import { CodemodeSandbox } from "@earendil-works/pi-codemode";
+import { createToolSearchExtension } from "@earendil-works/pi-durable/tool-search";
 import { Subagent } from "./subagent.ts";
 import {
 	type ModelRuntime,
@@ -63,13 +67,22 @@ export function createHarnessSettings(
 	};
 }
 
-export function createCodingRegistry(
+export async function createCodingRegistry(
 	settingsManager: SettingsManager,
 	cwd: string,
 	promptOptions?: PromptOptions,
-): Registry {
+): Promise<Registry> {
 	const registry = createRegistry();
-	registry.install(CodingTools);
+	let codingTools = CodingTools;
+	try {
+		const images = await createNodePhotonImages();
+		codingTools = createCodingTools({ images });
+	} catch (err) {
+		console.warn("[HarnessSetup] Photon image processor fallback to basic tools:", err);
+	}
+	registry.install(codingTools);
+	registry.install(createCodemodeExtension({ sandbox: new CodemodeSandbox() }));
+	registry.install(createToolSearchExtension());
 	registry.install(Subagent);
 	registry.install(createPiPrompt(settingsManager, cwd, promptOptions));
 	return registry;

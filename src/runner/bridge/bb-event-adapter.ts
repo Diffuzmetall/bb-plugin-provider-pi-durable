@@ -134,18 +134,19 @@ export class BBEventAdapter {
 					toolCallId: event.toolCallId,
 					toolName: event.toolName,
 					args: event.args ?? {},
+					...(event.parentToolCallId !== undefined ? { parentRef: event.parentToolCallId } : {}),
 				});
 				break;
 			}
 
 			case "tool_execution_update": {
-				const update = buildToolExecutionUpdate(event);
+				const update = buildToolExecutionUpdate(event, event.parentToolCallId);
 				if (update) this.output(update);
 				break;
 			}
 
 			case "tool_execution_end": {
-				this.output(buildToolExecutionEnd(event));
+				this.output(buildToolExecutionEnd(event, event.parentToolCallId));
 				break;
 			}
 

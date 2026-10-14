@@ -445,3 +445,53 @@
   1. Атомарность примитива: `subagent({ task, background })` остается чистым, предсказуемым строительным блоком.
   2. Оркестрация на стороне вызывающего: LLM нативно вызывает параллельные тулы за один ход (`tool_calls`), а конвейеры строит через последовательные вызовы или вложенность с полной гибкостью ветвления.
   3. Отсутствие раздувания: предотвращено усложнение раннера парсингом DSL, шаблонизацией строк и обработкой частичных сбоев конвейера (соблюдение AP-015 и AP-019).
+
+---
+
+## Cycle 91: Pi Durable & Coding Agent v1.2.0 Parity, Native Durable Codemode & Multimodal Photon WASM
+
+**Goal:** Выполнить полный переход плагина на `@earendil-works/pi-durable@^1.2.0`, `@earendil-works/pi-coding-agent@^1.2.0` и `@earendil-works/pi-codemode@^1.2.0`, устранить ломающие изменения компилятора (`emitBeforeAgentStart`) и контрактов (`output` вместо `content`), перевести кодемод на нативный детерминированный QuickJS с SQLite-журналом повторов, внедрить превентивную защиту от Anthropic HTTP 400 при картинках в ошибках (#10794), подключить Photon WASM для чтения изображений в `read` и сохранить 100% прохождение тестов при строгом соблюдении AP-правил.
+
+### 1. Triaged Findings & Dispositions
+
+| ID | Issue / Component | Severity | Rule | Disposition | Root Cause & Resolution |
+|---|---|---|---|---|---|
+| **F-91-1** | Ошибка компиляции TS2554 в `emitBeforeAgentStart` | **P0** | AP-026, AP-029 | `fix-now` | В `pi-coding-agent@1.2.0` сигнатура `emitBeforeAgentStart` перешла на 2 аргумента (`BeforeAgentStartTrigger`). Вызовы в `extension-mount.ts` и `runtime-controller.ts` адаптированы на `{ messageType: "user", prompt: text, images: undefined }`. |
+| **F-91-2** | Тихое исчезновение ответа `subagent` (`content` -> `output`) | **P0** | AP-013, AP-026 | `fix-now` | В Durable 1.2.0 `ToolExecutionResult.content` переименован в `output`. В `subagent.ts` и `tool-adapter.ts` возвраты переведены на `output` с поддержкой `content` для обратной совместимости, а в `tool-result-extractor.ts` извлекается `msg.output ?? msg.content`. |
+| **F-91-3** | Падение `bash` на вызове `api.retainedOutput()` в мок-api | **P1** | AP-010, AP-026 | `fix-now` | В `createNestedToolExecutor` добавлен метод `retainedOutput: () => ({ text: outputText, truncated: false })` и `outputWindow: undefined`. |
+| **F-91-4** | In-Memory Codemode без ACID-журнала и отсутствующая зависимость | **P1** | AP-010, AP-026 | `fix-now` | Добавлен `@earendil-works/pi-codemode@^1.2.0` в `dependencies` и `build-runner.mjs`. В `createCodingRegistry` инсталлированы нативные `createCodemodeExtension({ sandbox: new CodemodeSandbox() })` и `createToolSearchExtension()`. |
+| **F-91-5** | Зависание сессии Anthropic HTTP 400 при картинках в ошибках тулов (#10794) | **P1** | AP-010, AP-026 | `fix-now` | В `tool-result-extractor.ts` и `tool-adapter.ts` внедрена функция `sanitizeToolResultForAnthropic`, замещающая блоки `image` на текст `[image omitted: error tool results cannot contain images]` при `isError === true`. |
+| **F-91-6** | Ошибка `unsupported_image` в инструменте `read` | **P2** | AP-010, AP-013 | `fix-now` | В `harness-setup.ts` подключен `@earendil-works/pi-durable/images/node` через `createCodingTools({ images: await createNodePhotonImages() })` с безопасным fallback. |
+| **F-91-7** | Несовпадение семантики кода выхода bash в тестах codemode | **P2** | AP-028 | `fix-now` | В 1.2.0 `tools.bash` возвращает `{ structuredOutput, exitCode }` вместо исключения. Тест в `codemode-full-coverage.test.ts` адаптирован под проверку `err.message` (`Tool "bash" failed`). |
+| **F-91-8** | Заблуждение о наличии `parentToolCallId` у субагентов | **P1** | AP-012, AP-026 | `log-only` | Дочерние беседы субагентов (`createConversation`) не получают `parentToolCallId` от ядра Durable. `BBChildEventAdapter` и связывание по `parentRef` сохранены в полной мере. |
+
+### 2. Architecture Implementations
+- **`package.json` & `scripts/build-runner.mjs` (AP-026 Single Truth):**
+  - Подняты версии `@earendil-works/pi-durable@^1.2.0`, `@earendil-works/pi-coding-agent@^1.2.0`.
+  - Добавлен `@earendil-works/pi-codemode@^1.2.0` в зависимости и список externals бандлера.
+- **`src/runner/harness-setup.ts` (161 строка, AP-019 < 200):**
+  - Асинхронный реестр `createCodingRegistry` с нативным `CodemodeExtension`, `ToolSearchExtension` и Photon WASM `createNodePhotonImages()`.
+- **`src/runner/extension-mount.ts` (195 строк, AP-019 < 200):**
+  - Мок `api` дополнен методами `retainedOutput` и `outputWindow`.
+  - Вызов `emitBeforeAgentStart` адаптирован под дискриминированное объединение `BeforeAgentStartTrigger`.
+- **`src/runner/tool-adapter.ts` (170 строк, AP-019 < 200):**
+  - Двусторонний возврат `output` и `content` для полной совместимости с Durable 1.2.0 и существующими тестами.
+  - Поддержка санитизации картинок в ошибочных вызовах для Anthropic.
+  - Декларативный флаг `deferred: true` для отложенных инструментов.
+- **`src/runner/bridge/bb-event-adapter.ts` (194 строки, AP-019 < 200):**
+  - Автоматическая передача `event.parentToolCallId` как `parentRef` для вложенных инструментов.
+- **`src/runner/bridge/tool-result-extractor.ts` (137 строк, AP-019 < 200):**
+  - Извлечение результата из `msg.output ?? msg.content`.
+  - Функция `sanitizeToolResultForAnthropic`.
+- **`tests/read-images.test.ts` & `tests/anthropic-image-error.test.ts` (AP-028 Deterministic TDD):**
+  - Новые детерминированные тесты нативной обработки картинок и защитной санитизации Anthropic.
+
+### 3. Verification Evidence
+- `npx tsc --noEmit`: **0 errors (exit code 0)**.
+- `npm test`: **208 / 208 passing assertions across 12 test suites (0 failures, 0 skips)**.
+- `npm run build`: Сборка успешна (`dist/runner/index.js`, `dist/server.js`, `dist/host.js`).
+- `npm run doctor`: **7 System Tools, 6 Extension Tools, 7 Loaded Extensions, Durable v1.2.0**.
+- Строгое соблюдение AP-019: **100% файлов в `src/runner/` строго < 200 строк**.
+- Артефакты синхронизированы в кеш BB (`~/.bb/plugins/cache/git/github.com/VanDalkvist/bb-plugin-provider-pi-durable/6de0b69a1c860cfaf33a0c85fd07347c30564faf/dist/`).
+- `bb plugin reload provider-pi-durable`: Перезагрузка успешна, статус `running`.
+

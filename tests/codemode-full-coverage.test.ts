@@ -165,11 +165,14 @@ test("Codemode Full Coverage: end-to-end capabilities suite", async (t) => {
 				await tools.bash({ command: "exit 42" });
 				return "unexpected";
 			} catch (err) {
-				return "caught_bash: " + err.message;
+				return "caught_bash: " + (err.message || String(err));
 			}
 		`);
 		assert.equal(resCaughtBash.isError, false);
-		assert.ok(resCaughtBash.text.includes("caught_bash: Command exited with code 42"));
+		assert.ok(
+			resCaughtBash.text.includes("caught_bash:") &&
+				(resCaughtBash.text.includes('Tool "bash" failed') || resCaughtBash.text.includes("Command exited with code 42")),
+		);
 
 		// 5. Uncaught tool error produces failed script result
 		const resUncaught = await harness.execCode('await tools.read({ path: "another_missing_file.txt" });');

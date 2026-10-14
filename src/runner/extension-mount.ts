@@ -168,16 +168,11 @@ export async function mountExtensionBridge(
 				report(err);
 				onNotice?.("error", `[Extension Error] ${err.extensionPath} (${err.event}): ${err.error}`);
 			});
-
 			try {
 				const currentTools = registry.snapshot().tools().map((t) => t.tool.name);
 				const beforeStart = await extensionRunner.emitBeforeAgentStart(
 					{ messageType: "user", prompt: "", images: undefined },
-					{
-						cwd: location.cwd,
-						selectedTools: currentTools,
-						sections: dynamicSections?.getSections() ?? {},
-					},
+					{ cwd: location.cwd, selectedTools: currentTools, sections: dynamicSections?.getSections() ?? {} },
 				);
 				if (beforeStart?.systemPromptOptions?.sections && dynamicSections) {
 					dynamicSections.updateSections(beforeStart.systemPromptOptions.sections);

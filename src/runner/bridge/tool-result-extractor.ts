@@ -1,4 +1,5 @@
 import type { EntryRecord } from "@earendil-works/pi-durable";
+import type { TextContent, ImageContent } from "@earendil-works/pi-ai";
 import type {
 	BBToolExecutionEndEvent,
 	BBToolExecutionUpdateEvent,
@@ -123,11 +124,14 @@ export function buildToolExecutionEnd(
  * when isError is true, preventing HTTP 400 ("all content must be type text if is_error is true").
  * See: https://github.com/earendil-works/pi/issues/10794
  */
-export function sanitizeToolResultForAnthropic<T extends { type: string }>(blocks: T[], isError?: boolean): T[] {
+export function sanitizeToolResultForAnthropic(
+	blocks: Array<TextContent | ImageContent>,
+	isError?: boolean,
+): Array<TextContent | ImageContent> {
 	if (!isError || !Array.isArray(blocks)) return blocks;
 	return blocks.map((block) => {
 		if (block.type === "image") {
-			return { type: "text", text: "[image omitted: error tool results cannot contain images]" } as unknown as T;
+			return { type: "text" as const, text: "[image omitted: error tool results cannot contain images]" };
 		}
 		return block;
 	});
