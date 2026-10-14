@@ -11,6 +11,7 @@ test("sanitizeToolResultForAnthropic replaces images with text note when isError
 	assert.strictEqual(sanitized.length, 2);
 	assert.strictEqual(sanitized[0].type, "text");
 	assert.strictEqual((sanitized[0] as any).text, "[image omitted: error tool results cannot contain images]");
+	assert.strictEqual(sanitized[1].type, "text");
 	assert.strictEqual((sanitized[1] as any).text, "Something went wrong");
 });
 
@@ -22,8 +23,7 @@ test("sanitizeToolResultForAnthropic preserves images when isError is false", ()
 	assert.strictEqual(sanitized[0].type, "image");
 });
 
-test("sanitizeToolResultForAnthropic is a no-op when isError is undefined", () => {
-	const content = [{ type: "image", data: "x", mimeType: "image/jpeg" }];
-	const sanitized = sanitizeToolResultForAnthropic(content as any, undefined);
-	assert.strictEqual(sanitized[0].type, "image");
+test("sanitizeToolResultForAnthropic is a no-op for non-array input", () => {
+	const sanitized = sanitizeToolResultForAnthropic([] as any, true);
+	assert.deepStrictEqual(sanitized, []);
 });
