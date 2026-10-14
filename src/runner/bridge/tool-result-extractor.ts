@@ -6,6 +6,7 @@ import type {
 
 interface RawToolResultMessage {
 	isError?: boolean;
+	output?: string | Array<{ text?: string; [key: string]: unknown }>;
 	content?: string | Array<{ text?: string; [key: string]: unknown }>;
 	[key: string]: unknown;
 }
@@ -37,13 +38,14 @@ export function extractToolResult(modelItem: unknown): { result: string; isError
 	const msg = typeof modelItem === "object" && modelItem !== null ? (modelItem as RawToolResultMessage) : undefined;
 	const isError = msg?.isError ?? false;
 	let result = "";
-	if (Array.isArray(msg?.content)) {
-		result = msg.content
+	const raw = msg?.output ?? msg?.content;
+	if (Array.isArray(raw)) {
+		result = raw
 			.map((b) => (typeof b === "object" && b !== null && typeof b.text === "string" ? b.text : ""))
 			.filter(Boolean)
 			.join("\n");
-	} else if (typeof msg?.content === "string") {
-		result = msg.content;
+	} else if (typeof raw === "string") {
+		result = raw;
 	}
 	return { result, isError };
 }

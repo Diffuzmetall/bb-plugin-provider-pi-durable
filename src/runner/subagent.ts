@@ -70,7 +70,7 @@ export const Subagent: Extension = defineExtension({
 
 				if (isBackground) {
 					return {
-						content: [
+						output: [
 							{
 								type: "text",
 								text: `Subagent spawned in background (conversation ${child}). The task is running independently and will report upon completion.`,
@@ -85,7 +85,7 @@ export const Subagent: Extension = defineExtension({
 					throw new Error(`Subagent ${child} failed: ${settled.status}`);
 				}
 				const text = await answerText(api, settled.answer, context);
-				return { content: [{ type: "text", text }], details: { conversationId: child, background: false, task: args.task } };
+				return { output: [{ type: "text", text }], details: { conversationId: child, background: false, task: args.task } };
 			},
 		}),
 	],

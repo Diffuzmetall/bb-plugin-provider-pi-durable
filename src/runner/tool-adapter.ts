@@ -81,7 +81,7 @@ export function adaptExtensionTool(
 				});
 				if (hookResult?.block) {
 					return {
-						content: [{ type: "text", text: `Tool execution blocked: ${hookResult.reason ?? "policy"}` }],
+						output: [{ type: "text", text: `Tool execution blocked: ${hookResult.reason ?? "policy"}` }],
 						isError: true,
 					};
 				}
@@ -125,7 +125,7 @@ export function adaptExtensionTool(
 				}
 
 				return {
-					content: result.content,
+					output: result.content,
 					isError: result.isError,
 					details: (result.details ?? undefined) as JsonValue | undefined,
 				};
@@ -144,7 +144,7 @@ export function adaptExtensionTool(
 					});
 				}
 				return {
-					content: errorContent,
+					output: errorContent,
 					isError: true,
 				};
 			}

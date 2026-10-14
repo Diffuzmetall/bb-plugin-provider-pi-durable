@@ -61,7 +61,7 @@ test("Subagent tool in background mode returns immediately without waiting for c
 	);
 
 	assert.equal(waitCalled, false, "Background subagent must NOT wait synchronously");
-	assert.ok(result.content[0].text.includes("Subagent spawned in background"));
+	assert.ok(result.output[0].text.includes("Subagent spawned in background"));
 	assert.equal(reportedDetails.conversationId, "conv_child_99");
 	assert.equal(reportedDetails.background, true);
 	assert.equal(submittedContent, "Do fast background job");
@@ -102,5 +102,28 @@ test("Subagent tool in foreground mode (background: false) waits for child compl
 	);
 
 	assert.equal(waitCalled, true, "Foreground subagent must wait synchronously");
-	assert.equal(result.content[0].text, "Foreground finished");
+	assert.equal(result.output[0].text, "Foreground finished");
+});
+
+test("Subagent tool execution returns output property according to Durable 1.2.0 contract", async () => {
+	const tool = Subagent.tools[0];
+	assert.ok(tool, "Subagent tool must exist");
+	const mockApi: any = {
+		taskId: "task_test_subagent_output",
+		commit: async (fn: any) => fn({
+			scanConversations: async () => ({ items: [] }),
+			createConversation: async () => ({ id: "conv_child_output_test" }),
+			doc: async () => ({}),
+			entry: async () => ({ model: [{ content: [{ type: "text", text: "Child solved task" }] }] }),
+		}),
+		details: async () => {},
+		conversation: async () => ({
+			submit: async () => ({
+				wait: async () => ({ status: "done", type: "input", answer: "entry_123" }),
+			}),
+		}),
+	};
+	const res = await tool.execute({ task: "Compute 2+2", background: false }, mockApi, {} as any);
+	assert.ok(Array.isArray(res.output), "Must return output array");
+	assert.strictEqual((res as any).content, undefined, "content property must not be present");
 });
