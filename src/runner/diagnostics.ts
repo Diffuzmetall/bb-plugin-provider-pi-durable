@@ -102,9 +102,7 @@ export async function inspectPiEnvironment(options: { cwd?: string; agentDir?: s
 		});
 		const allTools = runner.getAllRegisteredTools();
 		mcpTools = allTools.filter((t) => t.definition.name.startsWith("mcp__")).map((t) => t.definition.name);
-		customTools = allTools
-			.filter((t) => !t.definition.name.startsWith("mcp__") && !["codemode", "tool_search"].includes(t.definition.name))
-			.map((t) => t.definition.name);
+		customTools = allTools.filter((t) => !t.definition.name.startsWith("mcp__")).map((t) => t.definition.name);
 		await runner.emit({ type: "session_shutdown", reason: "quit" });
 	} catch (err) {
 		console.warn(`[Diagnostics] Probe runner inspection notice: ${err instanceof Error ? err.message : String(err)}`);

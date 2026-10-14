@@ -11,10 +11,10 @@ import {
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 describe("Extension Bridge (Cycle 60)", () => {
-	it("createStandardExtensionFactories returns 3 built-in factories", () => {
+	it("createStandardExtensionFactories returns 1 built-in factory (MCP)", () => {
 		const factories = createStandardExtensionFactories();
 		assert.equal(Array.isArray(factories), true);
-		assert.equal(factories.length, 3);
+		assert.strictEqual(factories.length, 1);
 		for (const factory of factories) {
 			assert.equal(typeof factory, "function");
 		}

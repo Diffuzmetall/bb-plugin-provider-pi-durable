@@ -1,7 +1,5 @@
 import {
-	createCodemodeExtension,
 	createMcpExtension,
-	createToolSearchExtension,
 	type ExtensionFactory,
 	type ExtensionRunner,
 	type ExtensionToolContext,
@@ -40,7 +38,7 @@ export function hasOutput(api: unknown): api is { output(text: string): void } {
 
 /** Returns the standard built-in extension factories provided by Pi. */
 export function createStandardExtensionFactories(): ExtensionFactory[] {
-	return [createCodemodeExtension({ mode: "on" }), createToolSearchExtension(), createMcpExtension()];
+	return [createMcpExtension()];
 }
 
 /** Adapts an extension ToolDefinition to a Durable ToolRegistration without type escape hatches. */
@@ -55,7 +53,7 @@ export function adaptExtensionTool(
 	const callers =
 		exposure === "model-only"
 			? (["model"] as const)
-			: exposure === "codemode" || exposure === "deferred" || (exposure as string) === "codemode-deferred"
+			: exposure === "codemode" || (exposure as string) === "codemode-deferred"
 				? (["tools"] as const)
 				: exposure === "hidden"
 					? ([] as const)

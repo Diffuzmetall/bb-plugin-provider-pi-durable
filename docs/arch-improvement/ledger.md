@@ -495,3 +495,12 @@
 - Артефакты синхронизированы в кеш BB (`~/.bb/plugins/cache/git/github.com/VanDalkvist/bb-plugin-provider-pi-durable/6de0b69a1c860cfaf33a0c85fd07347c30564faf/dist/`).
 - `bb plugin reload provider-pi-durable`: Перезагрузка успешна, статус `running`.
 
+### 4. Review Audit Findings Resolution (Cycle 91 Review)
+
+| ID | Issue / Component | Severity | Rule | Disposition | Root Cause & Resolution |
+|---|---|---|---|---|---|
+| **F-91-9** | In-Memory Legacy Codemode & ToolSearch затеняли нативные расширения Durable | **P1** | AP-010, AP-013, AP-026 | `fix-now` | В `createStandardExtensionFactories` убраны фабрики `createCodemodeExtension` и `createToolSearchExtension` из `coding-agent`. Возвращается строго `[createMcpExtension()]`, предотвращая дублирование и затирание нативного Durable Codemode. Обновлена проверка в `tests/extension-bridge.test.ts` (`factories.length === 1`). Очищен `src/runner/diagnostics.ts`. |
+| **F-91-10** | Недоступность инструментов с `exposure: "deferred"` для вызова моделью и tool_search | **P1** | AP-010, AP-013, AP-026 | `fix-now` | В `src/runner/tool-adapter.ts` убран `exposure === "deferred"` из ветки `["tools"]`. Для `exposure === "deferred"` теперь корректно назначаются `callers: ["model", "tools"]` и `deferred: true`. Обновлены проверки в `tests/codemode-mcp-parity.test.ts`. |
+| **F-91-11** | Интеграционная тестовая фикстура кодемода маскировала дефекты устаревшим движком | **P2** | AP-028 | `fix-now` | В `tests/codemode-fixture.ts` удалена старая фабрика из `pi-coding-agent`, внедрен нативный `createCodemodeExtension` из `@earendil-works/pi-durable/codemode` с `CodemodeSandbox` из `@earendil-works/pi-codemode` и честной реализацией транзакций `CodemodeStoreDoc` / `CodemodeRunDoc`. |
+
+

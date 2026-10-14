@@ -791,9 +791,7 @@ import {
 
 // src/runner/tool-adapter.ts
 import {
-  createCodemodeExtension as createCodemodeExtension2,
-  createMcpExtension,
-  createToolSearchExtension as createToolSearchExtension2
+  createMcpExtension
 } from "@earendil-works/pi-coding-agent";
 import {
   defineExtension as defineExtension3,
@@ -881,12 +879,12 @@ function hasOutput(api) {
   return typeof api === "object" && api !== null && "output" in api && typeof api.output === "function";
 }
 function createStandardExtensionFactories() {
-  return [createCodemodeExtension2({ mode: "on" }), createToolSearchExtension2(), createMcpExtension()];
+  return [createMcpExtension()];
 }
 function adaptExtensionTool(toolDef, executeToolFn, createToolContext, getExtensionRunner) {
   const exposure = toolDef.exposure;
   const isDeferred = exposure === "deferred" || exposure === "codemode-deferred";
-  const callers = exposure === "model-only" ? ["model"] : exposure === "codemode" || exposure === "deferred" || exposure === "codemode-deferred" ? ["tools"] : exposure === "hidden" ? [] : ["model", "tools"];
+  const callers = exposure === "model-only" ? ["model"] : exposure === "codemode" || exposure === "codemode-deferred" ? ["tools"] : exposure === "hidden" ? [] : ["model", "tools"];
   return defineTool2({
     name: toolDef.name,
     description: toolDef.description,

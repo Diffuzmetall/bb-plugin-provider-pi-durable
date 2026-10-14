@@ -34,7 +34,8 @@ test("Parity: adaptExtensionTool maps exposure to durable callers", () => {
 	assert.deepEqual(tCodemode.callers, ["tools"]);
 
 	const tDeferred = adaptExtensionTool(dummyDef("t_deferred", "deferred"), async () => ({} as any));
-	assert.deepEqual(tDeferred.callers, ["tools"]);
+	assert.deepStrictEqual(tDeferred.callers, ["model", "tools"]);
+	assert.strictEqual(tDeferred.deferred, true);
 
 	const tCodemodeDeferred = adaptExtensionTool(dummyDef("t_codemode_deferred", "codemode-deferred"), async () => ({} as any));
 	assert.deepEqual(tCodemodeDeferred.callers, ["tools"]);

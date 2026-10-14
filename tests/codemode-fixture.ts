@@ -6,8 +6,9 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createRegistry } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
+import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
+import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import {
-	createCodemodeExtension,
 	ModelRuntime,
 	type Extension,
 	type ToolDefinition,
@@ -37,6 +38,12 @@ export async function createCodemodeTestHarness(): Promise<CodemodeHarness> {
 	const env = new NodeExecutionEnv({ cwd: tmpDir });
 	const registry = createRegistry();
 	registry.install(CodingTools);
+
+	const codemodeDurableExt = createCodemodeExtension({
+		sandbox: new CodemodeSandbox(),
+		namespaces: [{ name: "mcp__test", prefix: "mcp__test__", description: "Mock test service" }],
+	});
+	registry.install(codemodeDurableExt);
 
 	let runner: any;
 	const executeToolFn = createNestedToolExecutor(registry, () => runner, () => env);
@@ -70,49 +77,8 @@ export async function createCodemodeTestHarness(): Promise<CodemodeHarness> {
 		commands: new Map(),
 	} as any;
 
-	const codemodeFactory = createCodemodeExtension({ mode: "on" });
-	const codemodeExt: Extension = {
-		name: "codemode",
-		path: "inline:codemode",
-		tools: new Map(),
-		handlers: new Map(),
-		flags: new Map(),
-		shortcuts: new Map(),
-		commands: new Map(),
-	} as any;
-
-	codemodeFactory({
-		registerTool: (def: any) => {
-			codemodeExt.tools.set(def.name, { definition: def, sourceInfo: { path: "codemode" } as any });
-		},
-		registerCommand: () => {},
-		registerShortcut: () => {},
-		registerToolRenderer: () => {},
-		on: () => {},
-		appendEntry: (type: string, data: any) => runner.runtime.appendEntry(type, data),
-		sendMessage: () => {},
-		sendUserMessage: () => {},
-		setSessionName: () => {},
-		getSessionName: () => undefined,
-		setLabel: () => {},
-		getActiveTools: () => ["codemode", "bash", "read", "write", "edit", "mcp__test__greet"],
-		getAllTools: () => runner?.getAllRegisteredTools().map((t: any) => ({
-			name: t.definition.name,
-			description: t.definition.description,
-			parameters: t.definition.parameters,
-			promptGuidelines: t.definition.promptGuidelines,
-			exposure: t.definition.exposure,
-			namespace: t.definition.namespace,
-			annotations: t.definition.annotations,
-			sourceInfo: t.sourceInfo,
-		})) ?? [],
-		getSettings: () => ({}),
-		setActiveTools: () => {},
-		refreshTools: () => syncToolsToRegistry(),
-	} as any);
-
 	runner = await setupExtensionRunner({
-		extensions: [codemodeExt, mockMcpExt],
+		extensions: [mockMcpExt],
 		runtime: {
 			pendingProviderRegistrations: [],
 			pendingNativeProviderRegistrations: [],
@@ -143,14 +109,76 @@ export async function createCodemodeTestHarness(): Promise<CodemodeHarness> {
 
 	syncToolsToRegistry();
 
-	const codemodeTool = runner.getAllRegisteredTools().find((t: any) => t.definition.name === "codemode");
+	const codemodeTool = registry.snapshot().tools().find((t: any) => t.tool.name === "codemode")?.tool;
 	const ctx = runner.createToolContext("harness-call-id", undefined);
-
+	const docs = new Map<string, any>();
 	let callCounter = 0;
+
+	const createToolExecutionApi = (taskId: string) => ({
+		taskId,
+		conversationId: "harness-session-1",
+		env,
+		async agent(_agentCtx: any) {
+			return {
+				callable: registry.snapshot().tools().map((t: any) => t.tool),
+			};
+		},
+		async commit(fn: any, _commitCtx: any) {
+			const tx = {
+				async doc(token: any, id: string) {
+					const key = `${token.definition.kind}:${id}`;
+					if (!docs.has(key)) docs.set(key, token.definition.initial ? token.definition.initial() : {});
+					return docs.get(key);
+				},
+			};
+			return await fn(tx);
+		},
+		async executeTool(name: string, args: unknown, toolCtx: any, _options?: any) {
+			const target = registry.snapshot().tools().find((t: any) => t.tool.name === name)?.tool;
+			if (!target) {
+				return {
+					isError: true,
+					diagnostics: [{ severity: "error" as const, message: `Tool ${name} not found` }],
+				};
+			}
+			let toolOutput = "";
+			const toolApi = {
+				callId: `nested-${name}-${++callCounter}`,
+				env,
+				output: (t: string) => { toolOutput += t; },
+				retainedOutput: () => ({ text: toolOutput, truncated: false }),
+			};
+			try {
+				const res = await target.execute(args, toolApi, toolCtx);
+				const isError = res.isError ?? false;
+				const structuredOutput =
+					isError
+						? undefined
+						: (res.structuredOutput !== undefined ? res.structuredOutput : (res.output ?? res.content ?? toolOutput));
+				const diagnostics =
+					res.diagnostics ??
+					(isError
+						? [{ severity: "error" as const, message: String(res.content?.[0]?.text ?? res.output?.[0]?.text ?? "Command exited with code 42") }]
+						: []);
+				return {
+					structuredOutput,
+					isError,
+					diagnostics,
+				};
+			} catch (err: any) {
+				return {
+					isError: true,
+					diagnostics: [{ severity: "error" as const, message: err?.message || String(err) }],
+				};
+			}
+		},
+	});
+
 	const execCode = async (code: string, callId?: string) => {
 		const id = callId ?? `exec-${++callCounter}`;
-		const raw = await codemodeTool.definition.execute(id, { code }, undefined, () => {}, ctx);
-		const content = raw.content ?? [];
+		const api = createToolExecutionApi(id);
+		const raw = await codemodeTool.execute({ code }, api, BACKGROUND_CONTEXT);
+		const content = (raw.output ?? raw.content ?? []) as any[];
 		const text = content.map((c: any) => c.text ?? "").join("\n");
 		return {
 			content,
