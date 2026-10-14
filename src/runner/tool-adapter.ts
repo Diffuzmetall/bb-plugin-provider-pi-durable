@@ -13,6 +13,7 @@ import {
 	type Registry,
 	type ToolRegistration,
 } from "@earendil-works/pi-durable";
+import { sanitizeToolResultForAnthropic } from "./bridge/tool-result-extractor.ts";
 
 type JsonValue = string | number | boolean | null | { [key: string]: JsonValue } | JsonValue[];
 
@@ -124,8 +125,9 @@ export function adaptExtensionTool(
 					});
 				}
 
+				const sanitizedOutput = sanitizeToolResultForAnthropic(result.content as Array<{ type: string }>, result.isError);
 				return {
-					output: result.content,
+					output: sanitizedOutput,
 					isError: result.isError,
 					details: (result.details ?? undefined) as JsonValue | undefined,
 				};

@@ -117,3 +117,18 @@ export function buildToolExecutionEnd(
 		...(parentRef !== undefined ? { parentRef } : {}),
 	};
 }
+
+/**
+ * Sanitizes tool result content blocks for Anthropic: replaces image blocks with text notes
+ * when isError is true, preventing HTTP 400 ("all content must be type text if is_error is true").
+ * See: https://github.com/earendil-works/pi/issues/10794
+ */
+export function sanitizeToolResultForAnthropic<T extends { type: string }>(blocks: T[], isError?: boolean): T[] {
+	if (!isError || !Array.isArray(blocks)) return blocks;
+	return blocks.map((block) => {
+		if (block.type === "image") {
+			return { type: "text", text: "[image omitted: error tool results cannot contain images]" } as unknown as T;
+		}
+		return block;
+	});
+}
