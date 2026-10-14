@@ -60,21 +60,24 @@ export function createNestedToolExecutor(
 				args: unknown,
 				api: unknown,
 				ctx: unknown,
-			) => Promise<{ content: unknown; details?: unknown; isError?: boolean }>;
+			) => Promise<{ output?: unknown; content?: unknown; details?: unknown; isError?: boolean }>;
 			let outputText = "";
 			const api = {
 				callId: `${callerId}/nested`,
 				output: (chunk: string | Uint8Array) => {
 					outputText += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
 				},
+				retainedOutput: () => ({ text: outputText, truncated: false }),
+				outputWindow: undefined,
 				env: getEnv?.(),
 				diagnostic: () => {},
 			};
 			const res = await executor(args, api, runtimeContext);
-			const content = Array.isArray(res?.content)
-				? (res.content as Array<{ type: "text"; text: string }>)
-				: res?.content !== undefined
-					? [{ type: "text" as const, text: String(res.content) }]
+			const rawBlocks = res?.output ?? res?.content;
+			const content = Array.isArray(rawBlocks)
+				? (rawBlocks as Array<{ type: "text"; text: string }>)
+				: rawBlocks !== undefined
+					? [{ type: "text" as const, text: String(rawBlocks) }]
 					: [{ type: "text" as const, text: outputText }];
 
 			if (runner?.hasHandlers("tool_result")) {
