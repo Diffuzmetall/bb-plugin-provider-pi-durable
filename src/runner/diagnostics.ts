@@ -84,7 +84,7 @@ export async function inspectPiEnvironment(options: { cwd?: string; agentDir?: s
 	});
 
 	const skillsRes = resourceLoader.getSkills();
-	const skillsList = Array.isArray(skillsRes) ? skillsRes : skillsRes?.skills ?? [];
+	const skillsList = skillsRes?.skills ?? [];
 
 	let mcpTools: string[] = [];
 	let customTools: string[] = [];

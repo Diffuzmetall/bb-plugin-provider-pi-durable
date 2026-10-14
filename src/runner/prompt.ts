@@ -12,7 +12,7 @@ import {
 
 export interface ResourceLoaderLike {
 	getAgentsFiles?: () => { agentsFiles: Array<{ path: string; content: string }> };
-	getSkills?: () => Skill[] | { skills: Skill[] };
+	getSkills?: () => { skills: Skill[] };
 }
 
 export interface DynamicSectionsHolder {
@@ -73,11 +73,7 @@ function resolveContextFiles(options: PromptOptions): Array<{ path: string; cont
 }
 
 function resolveSkills(options: PromptOptions): Skill[] {
-	if (options.resourceLoader?.getSkills) {
-		const res = options.resourceLoader.getSkills();
-		return Array.isArray(res) ? res : res?.skills ?? [];
-	}
-	return [];
+	return options.resourceLoader?.getSkills?.()?.skills ?? [];
 }
 
 interface PromptToolItem {

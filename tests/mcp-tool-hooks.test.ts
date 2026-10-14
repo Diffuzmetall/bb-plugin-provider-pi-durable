@@ -46,12 +46,12 @@ test("D-18: adaptExtensionTool invokes tool_call and tool_result extension hooks
 	const res = await adapted.execute({ query: "hello" } as any, { callId: "c_1", output: () => {} } as any, {} as any);
 	assert.equal(toolCallEmitted, true);
 	assert.equal(toolResultEmitted, true);
-	assert.deepEqual(res.content, [{ type: "text", text: "search_ok" }]);
+	assert.deepEqual(res.output, [{ type: "text", text: "search_ok" }]);
 
 	// Blocked by hook
 	const blockedRes = await adapted.execute({ query: "block_me" } as any, { callId: "c_2", output: () => {} } as any, {} as any);
 	assert.equal(blockedRes.isError, true);
-	assert.ok(String(blockedRes.content?.[0]?.text).includes("guardrail_violation"));
+	assert.ok(String(blockedRes.output?.[0]?.text).includes("guardrail_violation"));
 });
 
 test("D-18: createNestedToolExecutor invokes tool_call and tool_result on nested calls", async () => {
@@ -62,7 +62,7 @@ test("D-18: createNestedToolExecutor invokes tool_call and tool_result on nested
 			defineTool({
 				name: "echo_tool",
 				parameters: Type.Object({ text: Type.String() }),
-				execute: async (args: any) => ({ content: [{ type: "text", text: `echo:${args.text}` }] }),
+				execute: async (args: any) => ({ output: [{ type: "text", text: `echo:${args.text}` }] }),
 			}),
 		],
 	});

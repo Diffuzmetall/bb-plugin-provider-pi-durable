@@ -39,7 +39,7 @@ export function extractToolResult(modelItem: unknown): { result: string; isError
 	const msg = typeof modelItem === "object" && modelItem !== null ? (modelItem as RawToolResultMessage) : undefined;
 	const isError = msg?.isError ?? false;
 	let result = "";
-	const raw = msg?.output ?? msg?.content;
+	const raw = msg?.content ?? msg?.output;
 	if (Array.isArray(raw)) {
 		result = raw
 			.map((b) => (typeof b === "object" && b !== null && typeof b.text === "string" ? b.text : ""))

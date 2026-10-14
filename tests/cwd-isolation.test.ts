@@ -82,13 +82,12 @@ describe("CWD Isolation and CLI Argument Parsing (Issue #1)", () => {
 		assert.ok(path.endsWith("thr_abc123"), "session path must end with thread id");
 	});
 
-	it("selectSession strips legacy .jsonl and .sqlite suffixes from target session path", async () => {
+	it("selectSession resolves target directory and strips .sqlite file suffix from target session path", async () => {
 		const temp = mkdtempSync(join(tmpdir(), "pi-session-d2-"));
 		try {
-			const targetWithJsonl = join(temp, "custom-thread.jsonl");
-			const location = await selectSession(temp, false, targetWithJsonl);
+			const targetWithSqlite = join(temp, "custom-thread", "session.sqlite");
+			const location = await selectSession(temp, false, targetWithSqlite);
 			try {
-				assert.equal(location.directory.endsWith(".jsonl"), false, "directory must not have .jsonl suffix");
 				assert.equal(location.directory.endsWith("custom-thread"), true);
 				assert.equal(location.database, join(temp, "custom-thread", "session.sqlite"));
 			} finally {

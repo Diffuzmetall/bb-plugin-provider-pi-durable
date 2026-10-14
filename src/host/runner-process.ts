@@ -115,8 +115,7 @@ export class RunnerProcess {
 		try {
 			await this.request({ type: "abort" }, Math.max(1000, Math.floor(timeoutMs / 2)));
 		} catch (err) {
-			// Non-fatal if process is already terminating or unresponsive
-			console.debug?.(`[RunnerProcess] Abort request before shutdown skipped: ${err instanceof Error ? err.message : String(err)}`);
+			console.warn(`[RunnerProcess] Abort request before shutdown skipped: ${err instanceof Error ? err.message : String(err)}`);
 		}
 
 		this.child.stdin?.end();

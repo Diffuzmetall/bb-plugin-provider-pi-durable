@@ -154,24 +154,13 @@ export async function selectSession(
 	let directory: string;
 	let created = false;
 	if (targetSession) {
-		let clean = targetSession;
-		if (clean.endsWith(".sqlite")) clean = resolve(clean, "..");
-		else if (clean.endsWith(".jsonl")) clean = clean.slice(0, -6);
+		const clean = targetSession.endsWith(".sqlite") ? resolve(targetSession, "..") : targetSession;
 		directory = (clean.includes("/") || clean.includes("\\")) ? resolve(clean) : join(root, clean);
 		try {
 			await mkdir(directory, { recursive: true });
 			const entries = await readdir(directory);
 			if (!entries.includes("session.sqlite")) {
-				const legacyDir = `${directory}.jsonl`;
-				try {
-					const legEntries = await readdir(legacyDir);
-					if (legEntries.includes("session.sqlite")) {
-						directory = legacyDir;
-					} else created = true;
-				} catch (err) {
-					logUnexpectedErr(err, "ENOENT", `Legacy session check failed in ${legacyDir}`);
-					created = true;
-				}
+				created = true;
 			}
 		} catch (err) {
 			logUnexpectedErr(err, "ENOENT", `Directory inspection failed in ${directory}`);

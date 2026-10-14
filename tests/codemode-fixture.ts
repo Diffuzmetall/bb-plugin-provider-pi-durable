@@ -154,11 +154,11 @@ export async function createCodemodeTestHarness(): Promise<CodemodeHarness> {
 				const structuredOutput =
 					isError
 						? undefined
-						: (res.structuredOutput !== undefined ? res.structuredOutput : (res.output ?? res.content ?? toolOutput));
+						: (res.structuredOutput !== undefined ? res.structuredOutput : (res.output ?? toolOutput));
 				const diagnostics =
 					res.diagnostics ??
 					(isError
-						? [{ severity: "error" as const, message: String(res.content?.[0]?.text ?? res.output?.[0]?.text ?? "Command exited with code 42") }]
+						? [{ severity: "error" as const, message: String(res.output?.[0]?.text ?? "Command exited with code 42") }]
 						: []);
 				return {
 					structuredOutput,
@@ -178,7 +178,7 @@ export async function createCodemodeTestHarness(): Promise<CodemodeHarness> {
 		const id = callId ?? `exec-${++callCounter}`;
 		const api = createToolExecutionApi(id);
 		const raw = await codemodeTool.execute({ code }, api, BACKGROUND_CONTEXT);
-		const content = (raw.output ?? raw.content ?? []) as any[];
+		const content = (raw.output ?? []) as any[];
 		const text = content.map((c: any) => c.text ?? "").join("\n");
 		return {
 			content,

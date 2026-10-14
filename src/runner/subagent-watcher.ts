@@ -90,7 +90,7 @@ export async function startSubagentWatcher(
 				try {
 					stream.stop();
 				} catch (err) {
-					console.debug?.(`[SubagentWatcher] Stream stop notice: ${err instanceof Error ? err.message : String(err)}`);
+					console.warn(`[SubagentWatcher] Stream stop warning: ${err instanceof Error ? err.message : String(err)}`);
 				}
 			}
 			activeStreams.clear();

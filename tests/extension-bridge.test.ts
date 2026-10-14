@@ -55,7 +55,7 @@ describe("Extension Bridge (Cycle 60)", () => {
 		);
 
 		assert.equal(executed, true);
-		assert.deepEqual(result.content, [{ type: "text", text: "Found result for: pi durable" }]);
+		assert.deepEqual(result.output, [{ type: "text", text: "Found result for: pi durable" }]);
 		assert.deepEqual(result.details, { matchCount: 1 });
 		assert.equal(result.isError, undefined);
 	});
@@ -87,7 +87,7 @@ describe("Extension Bridge (Cycle 60)", () => {
 		);
 
 		assert.equal(result.isError, true);
-		assert.deepEqual(result.content, [{ type: "text", text: "Failed to connect to service" }]);
+		assert.deepEqual(result.output, [{ type: "text", text: "Failed to connect to service" }]);
 		assert.deepEqual(result.details, { code: "ECONNREFUSED" });
 	});
 
@@ -163,7 +163,7 @@ describe("Extension Bridge (Cycle 60)", () => {
 		);
 
 		assert.deepEqual(outputChunks, ["step 1... ", "step 2... done!"]);
-		assert.deepEqual(resultWithOutput.content, [{ type: "text", text: "completed" }]);
+		assert.deepEqual(resultWithOutput.output, [{ type: "text", text: "completed" }]);
 
 		// Case 2: api.output is absent
 		const resultWithoutOutput = await durableTool.execute(
@@ -174,6 +174,6 @@ describe("Extension Bridge (Cycle 60)", () => {
 			{} as any,
 		);
 
-		assert.deepEqual(resultWithoutOutput.content, [{ type: "text", text: "completed" }]);
+		assert.deepEqual(resultWithoutOutput.output, [{ type: "text", text: "completed" }]);
 	});
 });

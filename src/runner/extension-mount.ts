@@ -60,7 +60,7 @@ export function createNestedToolExecutor(
 				args: unknown,
 				api: unknown,
 				ctx: unknown,
-			) => Promise<{ output?: unknown; content?: unknown; details?: unknown; isError?: boolean }>;
+			) => Promise<{ output?: unknown; details?: unknown; isError?: boolean }>;
 			let outputText = "";
 			const api = {
 				callId: `${callerId}/nested`,
@@ -73,7 +73,7 @@ export function createNestedToolExecutor(
 				diagnostic: () => {},
 			};
 			const res = await executor(args, api, runtimeContext);
-			const rawBlocks = res?.output ?? res?.content;
+			const rawBlocks = res?.output;
 			const content = Array.isArray(rawBlocks)
 				? (rawBlocks as Array<{ type: "text"; text: string }>)
 				: rawBlocks !== undefined

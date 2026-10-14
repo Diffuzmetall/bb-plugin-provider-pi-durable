@@ -53,7 +53,7 @@ export function adaptExtensionTool(
 	const callers =
 		exposure === "model-only"
 			? (["model"] as const)
-			: exposure === "codemode" || (exposure as string) === "codemode-deferred"
+			: exposure === "codemode" || exposure === "codemode-deferred"
 				? (["tools"] as const)
 				: exposure === "hidden"
 					? ([] as const)
@@ -63,7 +63,7 @@ export function adaptExtensionTool(
 		name: toolDef.name,
 		description: toolDef.description,
 		parameters: toolDef.parameters,
-		...(callers ? { callers } : {}),
+		callers,
 		...(isDeferred ? { deferred: true } : {}),
 		...(toolDef.outputSchema
 			? {
@@ -84,7 +84,6 @@ export function adaptExtensionTool(
 					const blockContent = [{ type: "text" as const, text: `Tool execution blocked: ${hookResult.reason ?? "policy"}` }];
 					return {
 						output: blockContent,
-						content: blockContent,
 						isError: true,
 					};
 				}
@@ -133,7 +132,6 @@ export function adaptExtensionTool(
 				);
 				return {
 					output: sanitizedOutput,
-					content: sanitizedOutput,
 					isError: result.isError,
 					details: (result.details ?? undefined) as JsonValue | undefined,
 				};
@@ -153,7 +151,6 @@ export function adaptExtensionTool(
 				}
 				return {
 					output: errorContent,
-					content: errorContent,
 					isError: true,
 				};
 			}

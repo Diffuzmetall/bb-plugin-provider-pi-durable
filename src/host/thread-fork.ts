@@ -24,16 +24,6 @@ export function forkSessionDatabase(options: ForkSessionOptions): void {
 	if (!existsSync(join(sourceDir, "session.sqlite"))) {
 		if (existsSync(join(options.sourceProviderThreadId, "session.sqlite"))) {
 			sourceDir = resolve(options.sourceProviderThreadId);
-		} else if (sourceDir.endsWith(".jsonl")) {
-			const stripped = sourceDir.slice(0, -6);
-			if (existsSync(join(stripped, "session.sqlite"))) {
-				sourceDir = stripped;
-			}
-		} else {
-			const legacyDir = `${sourceDir}.jsonl`;
-			if (existsSync(join(legacyDir, "session.sqlite"))) {
-				sourceDir = legacyDir;
-			}
 		}
 	}
 

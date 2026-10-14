@@ -220,7 +220,7 @@ test("D-16, D-17, D-18: Dynamic prompt sections, direct MCP & tool lifecycle hoo
 	const execRes = await adapted.execute({} as never, { callId: "c_ping" } as never, {} as never);
 	assert.equal(callHook, true, "D-18: emitToolCall invoked");
 	assert.equal(resultHook, true, "D-18: emitToolResult invoked");
-	assert.deepEqual(execRes.content, [{ type: "text", text: "pong" }]);
+	assert.deepEqual(execRes.output, [{ type: "text", text: "pong" }]);
 });
 
 test("D-19, D-20: Diagnostics notices & session ownership tracking", () => {

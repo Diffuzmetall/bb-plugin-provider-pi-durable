@@ -102,15 +102,16 @@ describe("Thread Fork Service and RPC (Cycle 69 - AP-013, AP-026, AP-028)", () =
 		);
 	});
 
-	it("forking resolves source session located in legacy .jsonl directory", () => {
-		createSessionDb(join(tempDir, "pi_durable_legacy.jsonl"), [{ id: 10, record: '{"type":"legacy"}' }]);
+	it("forking resolves source session located in custom absolute directory path", () => {
+		const customSource = join(tempDir, "pi_durable_custom_dir");
+		createSessionDb(customSource, [{ id: 10, record: '{"type":"custom"}' }]);
 		forkSessionDatabase({
-			sourceProviderThreadId: "pi_durable_legacy",
-			targetProviderThreadId: "pi_durable_legacy_forked",
+			sourceProviderThreadId: customSource,
+			targetProviderThreadId: "pi_durable_custom_forked",
 			env,
 		});
 
-		const forkedDbPath = join(tempDir, "pi_durable_legacy_forked", "session.sqlite");
+		const forkedDbPath = join(tempDir, "pi_durable_custom_forked", "session.sqlite");
 		assert.deepEqual(getEntryIds(forkedDbPath), [10]);
 	});
 

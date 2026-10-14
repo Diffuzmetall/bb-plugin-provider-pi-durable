@@ -150,11 +150,7 @@ function resolveContextFiles(options) {
   return options.resourceLoader?.getAgentsFiles?.()?.agentsFiles ?? [];
 }
 function resolveSkills(options) {
-  if (options.resourceLoader?.getSkills) {
-    const res = options.resourceLoader.getSkills();
-    return Array.isArray(res) ? res : res?.skills ?? [];
-  }
-  return [];
+  return options.resourceLoader?.getSkills?.()?.skills ?? [];
 }
 function buildRules(tools) {
   const rules = [];
@@ -598,24 +594,13 @@ async function selectSession(cwdInput, continueSession, targetSession) {
   let directory;
   let created = false;
   if (targetSession) {
-    let clean = targetSession;
-    if (clean.endsWith(".sqlite")) clean = resolve(clean, "..");
-    else if (clean.endsWith(".jsonl")) clean = clean.slice(0, -6);
+    const clean = targetSession.endsWith(".sqlite") ? resolve(targetSession, "..") : targetSession;
     directory = clean.includes("/") || clean.includes("\\") ? resolve(clean) : join(root, clean);
     try {
       await mkdir(directory, { recursive: true });
       const entries = await readdir(directory);
       if (!entries.includes("session.sqlite")) {
-        const legacyDir = `${directory}.jsonl`;
-        try {
-          const legEntries = await readdir(legacyDir);
-          if (legEntries.includes("session.sqlite")) {
-            directory = legacyDir;
-          } else created = true;
-        } catch (err) {
-          logUnexpectedErr(err, "ENOENT", `Legacy session check failed in ${legacyDir}`);
-          created = true;
-        }
+        created = true;
       }
     } catch (err) {
       logUnexpectedErr(err, "ENOENT", `Directory inspection failed in ${directory}`);
@@ -804,7 +789,7 @@ function extractToolResult(modelItem) {
   const msg = typeof modelItem === "object" && modelItem !== null ? modelItem : void 0;
   const isError = msg?.isError ?? false;
   let result = "";
-  const raw = msg?.output ?? msg?.content;
+  const raw = msg?.content ?? msg?.output;
   if (Array.isArray(raw)) {
     result = raw.map((b) => typeof b === "object" && b !== null && typeof b.text === "string" ? b.text : "").filter(Boolean).join("\n");
   } else if (typeof raw === "string") {
@@ -889,7 +874,7 @@ function adaptExtensionTool(toolDef, executeToolFn, createToolContext, getExtens
     name: toolDef.name,
     description: toolDef.description,
     parameters: toolDef.parameters,
-    ...callers ? { callers } : {},
+    callers,
     ...isDeferred ? { deferred: true } : {},
     ...toolDef.outputSchema ? {
       outputSchema: toolDef.outputSchema,
@@ -908,7 +893,6 @@ function adaptExtensionTool(toolDef, executeToolFn, createToolContext, getExtens
           const blockContent = [{ type: "text", text: `Tool execution blocked: ${hookResult.reason ?? "policy"}` }];
           return {
             output: blockContent,
-            content: blockContent,
             isError: true
           };
         }
@@ -947,7 +931,6 @@ function adaptExtensionTool(toolDef, executeToolFn, createToolContext, getExtens
         );
         return {
           output: sanitizedOutput,
-          content: sanitizedOutput,
           isError: result.isError,
           details: result.details ?? void 0
         };
@@ -967,7 +950,6 @@ function adaptExtensionTool(toolDef, executeToolFn, createToolContext, getExtens
         }
         return {
           output: errorContent,
-          content: errorContent,
           isError: true
         };
       }
@@ -1128,7 +1110,7 @@ function createNestedToolExecutor(registry, getExtensionRunner, getEnv) {
         }
       };
       const res = await executor(args2, api, runtimeContext);
-      const rawBlocks = res?.output ?? res?.content;
+      const rawBlocks = res?.output;
       const content = Array.isArray(rawBlocks) ? rawBlocks : rawBlocks !== void 0 ? [{ type: "text", text: String(rawBlocks) }] : [{ type: "text", text: outputText }];
       if (runner?.hasHandlers("tool_result")) {
         await runner.emitToolResult({
@@ -2259,7 +2241,7 @@ async function startSubagentWatcher(harness, adapter, getCurrentView) {
         try {
           stream.stop();
         } catch (err) {
-          console.debug?.(`[SubagentWatcher] Stream stop notice: ${err instanceof Error ? err.message : String(err)}`);
+          console.warn(`[SubagentWatcher] Stream stop warning: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
       activeStreams.clear();

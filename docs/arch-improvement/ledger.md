@@ -503,4 +503,48 @@
 | **F-91-10** | Недоступность инструментов с `exposure: "deferred"` для вызова моделью и tool_search | **P1** | AP-010, AP-013, AP-026 | `fix-now` | В `src/runner/tool-adapter.ts` убран `exposure === "deferred"` из ветки `["tools"]`. Для `exposure === "deferred"` теперь корректно назначаются `callers: ["model", "tools"]` и `deferred: true`. Обновлены проверки в `tests/codemode-mcp-parity.test.ts`. |
 | **F-91-11** | Интеграционная тестовая фикстура кодемода маскировала дефекты устаревшим движком | **P2** | AP-028 | `fix-now` | В `tests/codemode-fixture.ts` удалена старая фабрика из `pi-coding-agent`, внедрен нативный `createCodemodeExtension` из `@earendil-works/pi-durable/codemode` с `CodemodeSandbox` из `@earendil-works/pi-codemode` и честной реализацией транзакций `CodemodeStoreDoc` / `CodemodeRunDoc`. |
 
+---
+
+## Cycle 92: Elimination of Empty Catches, Redundant Fallbacks, and Legacy Compatibility Layers
+
+**Goal:** Систематически устранить технический долг обратной совместимости, подавленные ошибки и избыточные защитные ветвления: полностью вычистить легаси-проверки `.jsonl`-папок в `session-storage.ts` и `thread-fork.ts`, ликвидировать дублирующие свойства `content` в `tool-adapter.ts` в пользу каноничного `output` Durable 1.2.0, перевести неструктурированные перехваты ошибок на явные диагностические логи (`console.warn`) и очистить избыточные defensive-проверки типов (`resolveSkills`).
+
+### 1. Triaged Findings & Dispositions
+
+| ID | Issue / Component | Severity | Rule | Disposition | Root Cause & Resolution |
+|---|---|---|---|---|---|
+| **F-92-1** | Устаревшие ветки обратной совместимости с `.jsonl`-папками | **P1** | AP-010, AP-026 | `fix-now` | В `src/runner/session-storage.ts` удалена инспекция `legacyDir = directory + ".jsonl"` и обрезка `.jsonl` суффиксов. В `src/host/thread-fork.ts` удалены ветвления `sourceDir.endsWith(".jsonl")` и `legacyDir`. Обновлены `tests/cwd-isolation.test.ts` и `tests/thread-fork.test.ts` на тестирование чистого контракта SQLite-директорий. |
+| **F-92-2** | Дублирующее свойство `content` в адаптере инструментов (`tool-adapter.ts`) | **P1** | AP-010, AP-013 | `fix-now` | В `src/runner/tool-adapter.ts` удален дублирующий возврат `content: blockContent` / `content: sanitizedOutput` / `content: errorContent`. Возвращается строго каноничный `{ output, isError, details }` по контракту `ToolExecutionResult` Durable 1.2.0. Тесты обновлены на ассерты `.output`. |
+| **F-92-3** | Тихо подавляемые ошибки и `console.debug?.` в раннере и хосте | **P2** | AP-013, AP-028 | `fix-now` | В `subagent-watcher.ts` и `runner-process.ts` тихие/опциональные `console.debug?.` заменены на явные `console.warn` с контекстом компонентов. |
+| **F-92-4** | Избыточные проверки массивов в `resolveSkills` | **P2** | AP-029 | `fix-now` | В `src/runner/prompt.ts` и `src/runner/diagnostics.ts` устранена избыточная проверка `Array.isArray(res) ? res : res?.skills ?? []`. Сигнатура `ResourceLoaderLike.getSkills` синхронизирована с `pi-coding-agent@1.2.0` (`() => { skills: Skill[] }`). |
+| **F-92-5** | Избыточный каст `(exposure as string)` и условный спред `callers` в `tool-adapter.ts` | **P3** | AP-029 | `fix-now` | Убран повторный каст типа и избыточный тернарный спред для гарантированно определенного свойства `callers`. |
+
+### 2. Architecture Implementations
+- **`src/runner/session-storage.ts` (186 строк, AP-019 < 200, AP-010 Decoupled):**
+  - Удалена логика инспекции `directory + ".jsonl"`, директории разрешаются напрямую.
+  - Обрезка суффикса оставлена строго для прямых путей к файлам `.sqlite`.
+- **`src/host/thread-fork.ts` (81 строка, AP-019 < 250):**
+  - Удалены ветки форка из `.jsonl`-папок. Поиск базы ведется по каноничному пути `session.sqlite`.
+- **`src/runner/tool-adapter.ts` (165 строк, AP-019 < 200, AP-010 Thin Adapter):**
+  - Устранена дублирующая проперти `content:` при возврате результатов выполнения инструментов.
+  - Очищены типы и спреды `callers`.
+- **`src/runner/prompt.ts` (192 строки, AP-019 < 200) & `src/runner/diagnostics.ts` (174 строки, AP-019 < 200):**
+  - Прямое получение `skills` через `resourceLoader?.getSkills?.()?.skills ?? []` без устаревших полиморфных проверок.
+- **`src/runner/extension-mount.ts` (195 строк, AP-019 < 200):**
+  - Извлечение результатов выполнения инструментов напрямую из `res?.output`.
+- **`src/runner/subagent-watcher.ts` & `src/host/runner-process.ts`:**
+  - Логирование предупреждений при остановке стрима и пропуске прерывания через явный `console.warn`.
+- **`tests/`:**
+  - Обновлены тесты `cwd-isolation.test.ts`, `thread-fork.test.ts`, `mcp-tool-hooks.test.ts`, `extension-bridge.test.ts`, `cycle-74-remediation.test.ts`, `master-parity-conformance.test.ts`, `codemode-fixture.ts`, `codemode-nested-env.test.ts`, `prompt-adapter.test.ts`.
+
+### 3. Verification Evidence
+- `npx tsc --noEmit`: **0 errors (exit code 0)**.
+- `npm test`: **208 / 208 passing assertions across 12 test suites (0 failures, 0 skips)**.
+- `npm run build`: Сборка успешна (`dist/runner/index.js`, `dist/server.js`, `dist/host.js`).
+- `npm run doctor`: **7 System Tools, 6 Extension Tools, 5 Loaded Extensions, Durable v1.2.0**.
+- Строгое соблюдение AP-019: **100% файлов в `src/runner/` строго < 200 строк, 100% файлов в `src/host/` < 250 строк**.
+- Синхронизация: артефакты `dist` скопированы в кеш BB (`~/.bb/plugins/cache/git/github.com/VanDalkvist/bb-plugin-provider-pi-durable/6de0b69a1c860cfaf33a0c85fd07347c30564faf/dist/`).
+- `bb plugin reload provider-pi-durable`: Перезагрузка успешна, статус `running`.
+
+
 

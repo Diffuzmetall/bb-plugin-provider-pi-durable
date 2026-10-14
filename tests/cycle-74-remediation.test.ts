@@ -85,7 +85,7 @@ test("P2-1: adaptExtensionTool emits tool_result with isError: true when execute
 
 	assert.equal(toolResultEmitted, true);
 	assert.equal(outcome.isError, true);
-	assert.deepEqual(outcome.content, [{ type: "text", text: "Process segfault or crash" }]);
+	assert.deepEqual(outcome.output, [{ type: "text", text: "Process segfault or crash" }]);
 
 	const castResult = capturedResult as { isError: boolean; content: Array<{ text: string }> };
 	assert.equal(castResult.isError, true);

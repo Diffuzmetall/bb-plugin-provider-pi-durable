@@ -131,7 +131,7 @@ describe("Prompt Adapter (Cycle 61 - AP-010, AP-018)", () => {
 		};
 		const mockResourceLoader = {
 			getAgentsFiles: () => ({ agentsFiles: [] }),
-			getSkills: () => [mockSkill],
+			getSkills: () => ({ skills: [mockSkill] }),
 		};
 
 		const extension = createPiPrompt(settings, "/repo", {

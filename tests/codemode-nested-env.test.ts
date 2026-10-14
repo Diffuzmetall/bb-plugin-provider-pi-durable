@@ -150,7 +150,7 @@ test("Cycle 85: codemode script successfully executes tools.bash and tools.read 
 	// Test 2: Calling tools.read from codemode
 	const readResult = await codemodeTool.definition.execute(
 		"test_call_2",
-		{ code: "const res = await tools.read({ path: 'hello.txt' }); text(typeof res === 'string' ? res : (res.output ?? res.content ?? JSON.stringify(res)).map ? (res.output ?? res.content).map((c) => c.text).join('') : JSON.stringify(res));" },
+		{ code: "const res = await tools.read({ path: 'hello.txt' }); text(typeof res === 'string' ? res : (res.output ?? JSON.stringify(res)).map ? res.output.map((c) => c.text).join('') : JSON.stringify(res));" },
 		undefined,
 		() => {},
 		ctx,
