@@ -67,12 +67,15 @@ export function createDurableController(ctx: ControllerContext): DurableControll
 			command(async () => {
 				if (ctx.extensionRunner && ctx.dynamicSections) {
 					try {
-						const before = await ctx.extensionRunner.emitBeforeAgentStart(text, undefined, {
-							cwd: ctx.cwd ?? process.cwd(),
-							sections: ctx.dynamicSections.getSections(),
-						});
-						if (before?.systemPromptOptions?.sections) {
-							ctx.dynamicSections.updateSections(before.systemPromptOptions.sections);
+						const hookRes = await ctx.extensionRunner.emitBeforeAgentStart(
+							{ messageType: "user", prompt: text, images: undefined },
+							{
+								cwd: ctx.cwd ?? process.cwd(),
+								sections: ctx.dynamicSections.getSections(),
+							} as import("@earendil-works/pi-coding-agent").BuildSystemPromptOptions,
+						);
+						if (hookRes?.systemPromptOptions?.sections) {
+							ctx.dynamicSections.updateSections(hookRes.systemPromptOptions.sections);
 						}
 					} catch (err) {
 						ctx.notice(
