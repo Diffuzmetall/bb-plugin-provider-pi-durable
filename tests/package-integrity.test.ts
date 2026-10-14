@@ -57,6 +57,9 @@ test("package.json integrity: runtime dependencies contain all modules imported 
   assert.ok(deps.includes("@get-bb/plugin-sdk"), "missing @get-bb/plugin-sdk");
   assert.ok(deps.includes("@earendil-works/pi-durable"), "missing @earendil-works/pi-durable");
   assert.ok(deps.includes("@earendil-works/pi-coding-agent"), "missing @earendil-works/pi-coding-agent");
+  assert.ok(deps.includes("@earendil-works/pi-codemode"), "missing @earendil-works/pi-codemode");
+  assert.strictEqual(pkg.dependencies["@earendil-works/pi-durable"], "^1.2.0");
+  assert.strictEqual(pkg.dependencies["@earendil-works/pi-coding-agent"], "^1.2.0");
   assert.ok(deps.includes("proper-lockfile"), "missing proper-lockfile");
   assert.ok(deps.includes("zod"), "missing zod");
 });

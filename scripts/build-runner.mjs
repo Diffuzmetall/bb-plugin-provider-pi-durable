@@ -24,6 +24,8 @@ await build({
 		"@earendil-works/pi-durable/*",
 		"@earendil-works/pi-coding-agent",
 		"@earendil-works/pi-coding-agent/*",
+		"@earendil-works/pi-codemode",
+		"@earendil-works/pi-codemode/*",
 		"@earendil-works/pi-ai",
 		"@earendil-works/pi-ai/*",
 		"@earendil-works/chord",
