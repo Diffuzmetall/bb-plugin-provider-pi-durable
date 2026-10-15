@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Live Task Graph in BB's Plan Panel**: The runner forwards `harness.taskGraph()` to BB as `planSteps`, so the composer shows the chain of live tasks (`N/M complete`, in-progress first) instead of nothing. Rows follow creation order with children nested under their owner, and identical snapshots are dropped before they reach the wire.
 - **Named Steps**: A step says what its task is doing rather than only what kind it is: a tool task takes the name of the call it runs (`#12 bash: echo alpha`, `#13 read: src/runner/index.ts`), and the harness tasks read as `assistant turn` and `compacting context`. A node carries no checkpoint payload (spec §9.5), so a tool task is named from its call's own start event, which names the task it belongs to. Names are clipped to one bounded line; an unnamed task still shows its kind and phase.
 
+### Fixed
+- **Runner Resolution Against a Foreign Install (Issue #18)**: bb runs this plugin's host bundle from `<dataDir>/plugin-host-artifacts/<pluginId>/<digest>/host.mjs`, with no runner beside it and without `BB_DATA_DIR`, so resolving the runner by guessing the data dir let an unrelated `~/.bb` checkout answer for the plugin bb had actually activated: the plugin ran older code while still reporting the new version. The data dir is now read back out of the bundle's own deployed path, and the search order is that installation, its `bb.db` row, its caches, then the legacy `~/.bb`. A caller that names its own db or cache paths gets only what it named.
+
 ---
 
 ## [0.2.0] - 2026-10-07

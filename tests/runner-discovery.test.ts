@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { getBbDataDir, resolveRunnerPath, resolveSessionDir } from "../src/host/paths.ts";
+import { dataDirFromHostArtifact } from "../src/host/runner-lookup.ts";
 
 describe("Runner Path Discovery & Portability (Issue #2)", () => {
 	it("honors BB_PI_DURABLE_BRIDGE_COMMAND explicit override", () => {
@@ -180,6 +181,66 @@ describe("Runner Path Discovery & Portability (Issue #2)", () => {
 				},
 			);
 		} finally {
+			if (savedBridge !== undefined) process.env.BB_PI_DURABLE_BRIDGE_COMMAND = savedBridge;
+			if (savedRunner !== undefined) process.env.PI_DURABLE_RUNNER_PATH = savedRunner;
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("reads the data dir back out of bb's deployed host-artifact layout", () => {
+		assert.equal(
+			dataDirFromHostArtifact(join("/data", "plugin-host-artifacts", "provider-pi-durable", "d".repeat(64))),
+			"/data",
+		);
+		assert.equal(dataDirFromHostArtifact(join("/data", "plugins", "provider-pi-durable")), null);
+		assert.equal(dataDirFromHostArtifact("/tmp"), null);
+	});
+
+	it("prefers the data dir this host was deployed under over a foreign install (Issue #18)", () => {
+		const root = mkdtempSync(join(tmpdir(), "bb-artifact-datadir-"));
+		// What bb actually runs: <dataDir>/plugin-host-artifacts/<pluginId>/<digest>/host.mjs, alone in its dir.
+		const dataDir = join(root, "bb-server");
+		const artifactDir = join(dataDir, "plugin-host-artifacts", "provider-pi-durable", "d".repeat(64));
+		mkdirSync(artifactDir, { recursive: true });
+		writeFileSync(join(artifactDir, "host.mjs"), "// deployed host bundle, nothing beside it");
+
+		const activatedRoot = join(root, "activated-plugin");
+		mkdirSync(join(activatedRoot, "dist", "runner"), { recursive: true });
+		const expectedRunner = join(activatedRoot, "dist", "runner", "index.js");
+		writeFileSync(expectedRunner, "// the plugin bb activated");
+		const db = new DatabaseSync(join(dataDir, "bb.db"));
+		db.exec(`
+			CREATE TABLE plugins (
+				id TEXT PRIMARY KEY,
+				root_dir TEXT NOT NULL,
+				enabled INTEGER DEFAULT 1,
+				updated_at INTEGER DEFAULT 0
+			);
+			INSERT INTO plugins (id, root_dir, enabled) VALUES ('provider-pi-durable', '${activatedRoot}', 1);
+		`);
+		db.close();
+
+		// The stale clone that used to win: the bridge worker gets no BB_DATA_DIR, so the guess lands on whatever
+		// ~/.bb happens to hold, and that fallback then answered for the plugin bb had actually activated.
+		const foreignRoot = join(root, "foreign-bb", "plugins", "provider-pi-durable");
+		mkdirSync(join(foreignRoot, "dist", "runner"), { recursive: true });
+		writeFileSync(join(foreignRoot, "dist", "runner", "index.js"), "// a foreign install that must not answer");
+
+		const savedDataDir = process.env.BB_DATA_DIR;
+		const savedBridge = process.env.BB_PI_DURABLE_BRIDGE_COMMAND;
+		const savedRunner = process.env.PI_DURABLE_RUNNER_PATH;
+		delete process.env.BB_PI_DURABLE_BRIDGE_COMMAND;
+		delete process.env.PI_DURABLE_RUNNER_PATH;
+		try {
+			process.env.BB_DATA_DIR = join(root, "foreign-bb");
+			assert.equal(resolveRunnerPath({ fromDir: artifactDir }), expectedRunner);
+
+			// With BB_DATA_DIR unset the guess is no better either, so the artifact path still has to decide.
+			delete process.env.BB_DATA_DIR;
+			assert.equal(resolveRunnerPath({ fromDir: artifactDir }), expectedRunner);
+		} finally {
+			if (savedDataDir === undefined) delete process.env.BB_DATA_DIR;
+			else process.env.BB_DATA_DIR = savedDataDir;
 			if (savedBridge !== undefined) process.env.BB_PI_DURABLE_BRIDGE_COMMAND = savedBridge;
 			if (savedRunner !== undefined) process.env.PI_DURABLE_RUNNER_PATH = savedRunner;
 			rmSync(root, { recursive: true, force: true });
