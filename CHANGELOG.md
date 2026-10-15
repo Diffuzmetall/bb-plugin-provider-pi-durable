@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **Runner Resolution Against a Foreign Install (Issue #18)**: bb runs this plugin's host bundle from `<dataDir>/plugin-host-artifacts/<pluginId>/<digest>/host.mjs`, with no runner beside it and without `BB_DATA_DIR`, so resolving the runner by guessing the data dir let an unrelated `~/.bb` checkout answer for the plugin bb had actually activated: the plugin ran older code while still reporting the new version. The data dir is now read back out of the bundle's own deployed path, and the search order is that installation, its `bb.db` row, its caches, then the legacy `~/.bb`. A caller that names its own db or cache paths gets only what it named.
+
+---
+
 ## [0.2.0] - 2026-10-07
 
 ### Added
