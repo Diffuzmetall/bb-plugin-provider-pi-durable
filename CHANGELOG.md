@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Live Task Graph in BB's Plan Panel**: The runner forwards `harness.taskGraph()` to BB as `planSteps`, so the composer shows the chain of live tasks (`N/M complete`, in-progress first) instead of nothing. Rows follow creation order with children nested under their owner, and identical snapshots are dropped before they reach the wire.
+- **Named Steps**: A step says what its task is doing rather than only what kind it is: a tool task takes the name of the call it runs (`#12 bash: echo alpha`, `#13 read: src/runner/index.ts`), and the harness tasks read as `assistant turn` and `compacting context`. A node carries no checkpoint payload (spec §9.5), so a tool task is named from its call's own start event, which names the task it belongs to. Names are clipped to one bounded line; an unnamed task still shows its kind and phase.
+
+---
+
 ## [0.2.0] - 2026-10-07
 
 ### Added
