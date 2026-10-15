@@ -5,6 +5,10 @@ import { join } from "node:path";
 import { PiThreadSession } from "../src/host/session.ts";
 import { ModelCatalog } from "../src/host/catalog.ts";
 
+// A real runner enumerates every configured provider before it announces ready: 12.1s measured on a machine with
+// many of them, so this is a fail-fast ceiling (`Issue #3`), not a speed assertion.
+const CATALOGUE_READY_BUDGET_MS = 45_000;
+
 describe("Startup Readiness & Fail-Fast Handshake (Issue #3)", () => {
 	it("PiThreadSession.start() rejects immediately and kills runner when runner exits before ready", async () => {
 		const session = new PiThreadSession(
@@ -166,14 +170,21 @@ describe("Startup Readiness & Fail-Fast Handshake (Issue #3)", () => {
 			receivedReady = true;
 		});
 
+		let timer: NodeJS.Timeout | undefined;
 		try {
 			// Runner in --no-session will execute models discovery and emit ready over FD 3
 			await Promise.race([
 				session.readyPromise,
-				new Promise((_, reject) => setTimeout(() => reject(new Error("Catalogue ready timed out")), 10000)),
+				new Promise((_, reject) => {
+					timer = setTimeout(
+						() => reject(new Error(`Catalogue ready timed out after ${CATALOGUE_READY_BUDGET_MS}ms`)),
+						CATALOGUE_READY_BUDGET_MS,
+					);
+				}),
 			]);
 			assert.equal(receivedReady, true, "Catalogue mode must become ready without opening SQLite session");
 		} finally {
+			clearTimeout(timer);
 			session.runner.kill();
 		}
 	});
