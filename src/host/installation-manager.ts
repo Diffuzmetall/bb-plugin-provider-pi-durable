@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import manifest from "../../package.json" with { type: "json" };
 
 export interface ProviderInstallationAction { kind: "install" | "update"; label: "Install" | "Update"; command: string; }
 export type ProviderInstallationSource = "notInstalled" | "npmGlobal" | "external";
@@ -35,12 +36,20 @@ const PLUGIN_PACKAGE_NAME = "bb-plugin-provider-pi-durable";
 const PLUGIN_EXECUTABLE_NAME = "bb";
 const MINIMUM_SUPPORTED_VERSION = "0.2.0";
 
+// Baked into the bundle at build time. bb deploys the host bundle on its own as
+// <dataDir>/plugin-host-artifacts/<pluginId>/<digest>/host.mjs, with no package.json
+// anywhere near it, so the filesystem scan below cannot see the version at runtime.
+// The bundled value is the version of the code that is actually running.
+const BUNDLED_PLUGIN_VERSION =
+	typeof manifest.version === "string" && manifest.version.length > 0 ? manifest.version : "";
+
 let cachedPluginVersion: string | null = null;
 let cachedLatestVersion: { version: string; fetchedAt: number } | null = null;
 const LATEST_CACHE_TTL_MS = 60000;
 
 export function resolvePluginVersion(): string {
 	if (cachedPluginVersion !== null) return cachedPluginVersion;
+	if (BUNDLED_PLUGIN_VERSION.length > 0) return (cachedPluginVersion = BUNDLED_PLUGIN_VERSION);
 	try {
 		const currentDir = dirname(fileURLToPath(import.meta.url));
 		const candidates = [

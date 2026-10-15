@@ -1,6 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { z } from "zod";
 
 const pkgVersion = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version as string;
@@ -79,6 +85,42 @@ describe("Native Provider Installation Lifecycle (Cycle 76)", () => {
 	it("resolves the dynamic plugin version without hardcoded fallbacks", () => {
 		const version = resolvePluginVersion();
 		assert.equal(version, pkgVersion);
+	});
+
+	it("resolves the plugin version from bb's deployed host-artifact layout (no package.json nearby)", async () => {
+		// bb caches the built host bundle as
+		// <dataDir>/plugin-host-artifacts/<pluginId>/<digest>/host.mjs and ships nothing else
+		// with it, so the version must survive bundling instead of being read from disk.
+		const artifactRoot = await mkdtemp(join(tmpdir(), "pi-durable-artifact-"));
+		try {
+			const artifactDir = join(artifactRoot, "plugin-host-artifacts", "provider-pi-durable", "0".repeat(64));
+			await mkdir(artifactDir, { recursive: true });
+			const probeEntry = join(artifactRoot, "probe.ts");
+			const managerPath = fileURLToPath(new URL("../src/host/installation-manager.ts", import.meta.url));
+			await writeFile(
+				probeEntry,
+				`import { resolvePluginVersion } from ${JSON.stringify(managerPath)};\nprocess.stdout.write(resolvePluginVersion());\n`,
+			);
+			const esbuild = await import("esbuild");
+			await esbuild.build({
+				entryPoints: [probeEntry],
+				bundle: true,
+				platform: "node",
+				format: "esm",
+				target: "node22",
+				minify: true,
+				outfile: join(artifactDir, "host.mjs"),
+				logLevel: "error",
+			});
+			// The daemon's cwd is never the plugin directory, so probe from a neutral one: a
+			// stray package.json in the cwd must not be able to answer for the plugin.
+			const { stdout } = await promisify(execFile)(process.execPath, [join(artifactDir, "host.mjs")], {
+				cwd: artifactRoot,
+			});
+			assert.equal(stdout.trim(), pkgVersion);
+		} finally {
+			await rm(artifactRoot, { recursive: true, force: true });
+		}
 	});
 
 	it("correctly compares semver strings", () => {
