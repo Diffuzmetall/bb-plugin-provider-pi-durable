@@ -1559,6 +1559,9 @@ function isAgentDocument(doc) {
 function isUsageDocument(doc) {
   return typeof doc === "object" && doc !== null;
 }
+function isToolCallBlock(block) {
+  return typeof block === "object" && block !== null && block.type === "toolCall";
+}
 function isConversationEntryRecord(entry) {
   return typeof entry === "object" && entry !== null;
 }
@@ -1805,6 +1808,48 @@ var BBChildEventAdapter = class {
     }
   }
 };
+
+// src/runner/bridge/tool-args-resolver.ts
+function resolveToolCallArgs(callId, current) {
+  const rawLive = current.conversation.docs["pi.live"];
+  const live = typeof rawLive === "object" && rawLive !== null ? rawLive : {};
+  const rawBlocks = Array.isArray(live.generation?.message?.content) ? live.generation.message.content : [];
+  const activeCalls = rawBlocks.filter(isToolCallBlock);
+  if (activeCalls.length > 0) {
+    const matched = activeCalls.find((c) => c.id === callId || c.callId === callId);
+    if (matched?.arguments && typeof matched.arguments === "object") {
+      return matched.arguments;
+    }
+  }
+  const entries = current.conversation.entries ?? [];
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (isConversationEntryRecord(entry) && entry.kind === "pi.assistant" && Array.isArray(entry.model)) {
+      for (const msg of entry.model) {
+        if (Array.isArray(msg?.content)) {
+          for (const part of msg.content) {
+            if (isToolCallBlock(part) && (part.id === callId || part.callId === callId)) {
+              if (part.arguments && typeof part.arguments === "object") {
+                return part.arguments;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  const rawTools = Array.isArray(live.tools) ? live.tools : [];
+  const slot = rawTools.find((s) => {
+    if (typeof s !== "object" || s === null) return false;
+    const candidate = s;
+    const sid = candidate.callId ?? (candidate.id !== void 0 ? String(candidate.id) : void 0);
+    return sid === callId;
+  });
+  if (slot?.args && typeof slot.args === "object") {
+    return slot.args;
+  }
+  return {};
+}
 
 // src/runner/bridge/bb-event-adapter.ts
 var BBEventAdapter = class {
@@ -2292,6 +2337,109 @@ async function startSubagentWatcher(harness, adapter, getCurrentView) {
   };
 }
 
+// src/runner/task-labels.ts
+var MAX_NAME = 48;
+var KIND_NAMES = {
+  "pi.generation": "assistant turn",
+  "pi.compaction": "compacting context"
+};
+var ARG_KEYS = ["command", "path", "file_path", "pattern", "query", "url", "prompt"];
+function clip(text) {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length <= MAX_NAME ? oneLine : `${oneLine.slice(0, MAX_NAME - 1)}\u2026`;
+}
+function argumentHint(args2) {
+  if (typeof args2 !== "object" || args2 === null) return void 0;
+  const record = args2;
+  for (const key of ARG_KEYS) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim() !== "") return clip(value);
+  }
+  return void 0;
+}
+function liveOf(view) {
+  const raw = view?.conversation?.docs?.["pi.live"];
+  return typeof raw === "object" && raw !== null ? raw : {};
+}
+function isNested(slot) {
+  return "parentCallId" in slot;
+}
+var TaskNames = class {
+  names = /* @__PURE__ */ new Map();
+  learn(view) {
+    const live = liveOf(view);
+    for (const slot of [...live.tools ?? [], ...live.nestedTools ?? []]) {
+      if (slot.taskId === void 0) continue;
+      const key = String(slot.taskId);
+      if (this.names.has(key)) continue;
+      const args2 = isNested(slot) ? slot.arguments : resolveToolCallArgs(slot.callId, view);
+      const hint = argumentHint(args2);
+      this.names.set(key, clip(hint === void 0 ? slot.name : `${slot.name}: ${hint}`));
+    }
+  }
+  get(taskId) {
+    return this.names.get(taskId);
+  }
+};
+function taskLabel(node, names) {
+  const state = node.state;
+  const call = names?.get(String(node.id));
+  const plain = KIND_NAMES[node.kind];
+  const kind = call ?? plain ?? (node.kind.startsWith("pi.") ? node.kind.slice(3) : node.kind);
+  if (state.status === "waiting") return `${kind} \xB7 waiting on ${state.on.length}`;
+  if (state.status === "completing") return `${kind} \xB7 completing (${state.outcome})`;
+  return call !== void 0 || plain !== void 0 ? kind : `${kind} \xB7 ${state.phase}`;
+}
+
+// src/runner/task-graph-bridge.ts
+var INDENT = "  ";
+function statusOf(node) {
+  const state = node.state;
+  if (state.status === "running") return "active";
+  if (state.status === "completing") return state.outcome === "completed" ? "completed" : "failed";
+  return "pending";
+}
+function taskSteps(graph, names) {
+  const nodes = graph.tasks;
+  const keys = Object.keys(nodes).sort((a, b) => Number(a) - Number(b));
+  const children = /* @__PURE__ */ new Map();
+  for (const key of keys) {
+    const owner = nodes[key]?.owner;
+    if (owner === void 0) continue;
+    const siblings = children.get(String(owner));
+    if (siblings === void 0) children.set(String(owner), [key]);
+    else siblings.push(key);
+  }
+  const steps = [];
+  const walk = (key, depth) => {
+    const node = nodes[key];
+    if (node === void 0) return;
+    steps.push({ step: INDENT.repeat(depth) + `#${key} ${taskLabel(node, names)}`, status: statusOf(node) });
+    for (const child of children.get(key) ?? []) walk(child, depth + 1);
+  };
+  for (const key of keys) {
+    const owner = nodes[key]?.owner;
+    if (owner === void 0 || nodes[String(owner)] === void 0) walk(key, 0);
+  }
+  return steps;
+}
+function startTaskGraphBridge(view, output2) {
+  const names = new TaskNames();
+  let published = "";
+  const publish = () => {
+    const current = view.current();
+    names.learn(current);
+    const graph = current.tasks;
+    const steps = graph === void 0 ? [] : taskSteps(graph, names);
+    const encoded = JSON.stringify(steps);
+    if (steps.length === 0 || encoded === published) return;
+    published = encoded;
+    output2({ type: "tasks_snapshot", steps });
+  };
+  view.subscribe(publish);
+  publish();
+}
+
 // src/runner/index.ts
 var argv = process.argv.slice(2);
 if (argv.includes("--version") || argv.includes("-v")) {
@@ -2403,6 +2551,7 @@ async function main() {
   );
   const watcher = await startSubagentWatcher(durable.harness, adapter, () => durable.view.current());
   activeWatcher = watcher;
+  startTaskGraphBridge(durable.view, output);
   attachJsonlLineReader(process.stdin, async (line) => {
     let cmd;
     try {

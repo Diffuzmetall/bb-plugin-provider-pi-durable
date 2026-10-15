@@ -147,6 +147,17 @@ export interface BBAutoRetryEndEvent {
 	success?: boolean;
 }
 
+/** One row of BB's plan panel. BB renders these flat, so hierarchy lives in the label text. */
+export interface BBPlanStep {
+	step: string;
+	status: "pending" | "active" | "completed" | "failed";
+}
+
+export interface BBTasksSnapshotEvent {
+	type: "tasks_snapshot";
+	steps: BBPlanStep[];
+}
+
 export interface BBSessionStatsData {
 	contextUsage: { tokens: number; contextWindow: number };
 }
@@ -164,7 +175,8 @@ export type BBWireEvent =
 	| BBCompactionStartEvent
 	| BBCompactionEndEvent
 	| BBAutoRetryStartEvent
-	| BBAutoRetryEndEvent;
+	| BBAutoRetryEndEvent
+	| BBTasksSnapshotEvent;
 
 // Durable SQLite Document Schemas & Type Guards (AP-026, AP-029)
 export * from "./durable-contracts.ts";

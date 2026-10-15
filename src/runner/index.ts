@@ -8,6 +8,7 @@ import { handleActiveSessionCommand, type RunnerCommandPayload } from "./session
 import { getPiDurableVersion } from "./version.ts";
 import { createBridgeSender, initBridgeInboundChannel } from "./bridge-channel.ts";
 import { startSubagentWatcher, type SubagentWatcherController } from "./subagent-watcher.ts";
+import { startTaskGraphBridge } from "./task-graph-bridge.ts";
 
 const argv = process.argv.slice(2);
 
@@ -133,6 +134,7 @@ async function main() {
 	);
 	const watcher = await startSubagentWatcher(durable.harness, adapter, () => durable.view.current());
 	activeWatcher = watcher;
+	startTaskGraphBridge(durable.view, output);
 
 	// Handle stdin RPC commands in active session
 	attachJsonlLineReader(process.stdin, async (line) => {
